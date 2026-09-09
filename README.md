@@ -32,16 +32,25 @@ caller-supplied. Two tests enforce that rather than trusting it:
 | `scores.cell` / `.aggregate` | the two `CS_i` formulas; group summaries and matrices |
 | `viz.*` | style, colour policy, frugal boxes, and the figures |
 
-The one consumer is `code/05_enrich/interpretation.ipynb` — one notebook for every arm,
-parameterised by `$SCADS_DRVI_MODEL`, with this dataset's constants in
-`code/05_enrich/seaad_site.py`. It replaced four notebooks totalling 23 MB, three of
-which differed by a single line.
+## Where it came from
+
+The package was extracted from a SEA-AD single-cell ATAC capsule, where it replaced
+`code/common/` and four near-identical interpretation notebooks totalling 23 MB — three of
+which differed by a single line. The commit history here is that work, replayed onto the
+package subtree.
+
+That capsule remains the reference consumer: one `interpretation.ipynb` for every arm,
+parameterised by `$SCADS_DRVI_MODEL`, with the dataset's own constants in a site module
+(`seaad_site.py`) that is deliberately **not** part of this package. Keeping those
+constants outside is what the genericity rule above is protecting.
 
 ## Install
 
 ```bash
-pip install -e code/scads_drvi                    # normal case
-pip install -e code/scads_drvi --no-deps          # inside a mamba-solved prefix
+pip install -e .                    # normal case
+pip install -e . --no-deps          # inside a mamba-solved prefix
+
+pip install -e 'git+https://github.com/mikecuoco/scads_drvi@main#egg=scads-drvi'
 ```
 
 `--no-deps` matters in a conda/mamba environment: letting pip re-resolve `numpy` or
@@ -125,13 +134,20 @@ subprocess with those modules blocked.
 ## Tests
 
 ```bash
-pytest code/scads_drvi
+pytest
 ```
 
-Run this suite **separately** from `code/tests`. That suite's `conftest.py` inserts seven
-arm directories onto `sys.path`; collecting both in one session would let those inserts
-satisfy an import this package should satisfy itself — a false green hiding exactly the
-bug class the package exists to remove.
+CI runs it on three dependency stacks (`.github/workflows/tests.yml`), mirroring the three
+environments the package is deployed into: numpy 2 / pandas 3 with no optional
+dependencies at all, the declared floors (numpy 1.26 / pandas 2.1), and a current stack
+with h5py and plotting. That is not belt-and-braces — it is how two real bugs were found,
+each of which passed in one stack and failed in another.
+
+**If you vendor this package next to another test suite, collect the two separately.** In
+the capsule it came from, the sibling `conftest.py` inserts seven directories onto
+`sys.path`; collecting both in one session would let those inserts satisfy an import this
+package should satisfy itself — a false green hiding exactly the bug class the package
+exists to remove.
 
 ## LDSC
 

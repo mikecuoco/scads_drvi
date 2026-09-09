@@ -1,0 +1,24 @@
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Bytecode
+__pycache__/
+*.py[cod]
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# The pinned LDSC binary, when the default cache lands in-tree
+.ldsc-cache/
+
+# Editors, OS
+.vscode/
+.idea/
+.DS_Store

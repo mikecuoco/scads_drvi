@@ -9,6 +9,12 @@ description = "DRVI factorization, S-LDSC heritability enrichment and per-cell d
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Mike Cuoco", email = "mike.cuoco@alleninstitute.org" }]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
 
 # Floors DOCUMENT what the code needs; they are not an install instruction. Inside a
 # mamba-solved prefix install with --no-deps so pip never re-resolves numpy/pandas.
@@ -27,6 +33,11 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=7.4"]
+[project.urls]
+Homepage = "https://github.com/mikecuoco/scads_drvi"
+Source = "https://github.com/mikecuoco/scads_drvi"
+Issues = "https://github.com/mikecuoco/scads_drvi/issues"
+
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -37,10 +48,11 @@ where = ["src"]
 [tool.setuptools.package-data]
 scads_drvi = ["py.typed"]
 
-# rootdir is code/scads_drvi/, deliberately NOT the capsule root: code/tests/conftest.py
-# inserts seven arm directories into sys.path, and collecting both suites in one session
-# would let those inserts satisfy an import this package should satisfy itself -- a false
-# green that would hide exactly the bug class this package exists to remove.
+# testpaths is scoped to this repo's own tests. When the package is vendored beside
+# another suite -- as it is in the capsule it came from, whose conftest.py inserts seven
+# directories into sys.path -- the two must be collected in separate sessions, or those
+# inserts satisfy an import this package should satisfy itself: a false green hiding
+# exactly the bug class this package exists to remove.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
