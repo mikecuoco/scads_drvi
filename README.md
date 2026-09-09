@@ -27,6 +27,7 @@ caller-supplied. Two tests enforce that rather than trusting it:
 | `stats` | one-tailed p, Benjamini–Hochberg, BH-boundary z |
 | `io.artifacts` | obs decode, loadings, embeddings, `load_interpretation` |
 | `io.peaks` / `io.h5ad` / `io.contract` / `io.meta` | peak names, backed-h5ad reads, contract checks, run records |
+| `factorize.train` | fit a DRVI on one GPU or several, and write the run record |
 | `factorize.model` | load a fit, latent in requested row order, split responsibility |
 | `factorize.kernels` / `.multigpu` | interval kernels, torchrun plumbing |
 | `enrich.binary` | the pinned Rust LDSC: resolve, verify, build safe commands |
@@ -85,6 +86,75 @@ Defaults sit under `root` and each is individually overridable:
 `fit` and `traits` have **no** defaults on purpose — guessing either would silently point
 the pipeline at the wrong inputs.
 
+## Training a fit
+
+```python
+from scads_drvi.config import Project
+from scads_drvi.factorize.train import TrainConfig, train
+
+proj = Project(root="/path/to/analysis")
+cfg  = TrainConfig(
+    adata="/path/to/input.h5ad",
+    fit="k48",                  # -> data/factorize/k48/{model,fit.meta.json}
+    n_latent=48,
+    batch_key="a_covariate",    # recorded, and re-used verbatim when the fit is loaded
+    min_fragment=1000,          # depth gate; recorded so a later stage can check it
+    devices=4,                  # -> strategy="ddp_find_unused_parameters_true"
+    batch_size=128,             # PER DEVICE: the effective batch here is 512
+    max_epochs=400,
+    seed=0,                     # required for a distributed run, see below
+)
+train(proj, cfg)
+```
+
+or as a command, with the parameters in a preset module rather than in flags:
+
+```bash
+python -m scads_drvi.factorize.train production --config my_train_config.py
+python -m scads_drvi.factorize.train --config my_train_config.py --list
+```
+
+```python
+# my_train_config.py
+from scads_drvi.factorize.train import TrainConfig
+PRESETS = {"train": {"production": TrainConfig(...), "smoke": TrainConfig(smoke_test=True, ...)}}
+```
+
+Only the preset name and the module reach the command line, for the reason
+`_util/presets.py` gives: a value that can be passed as a flag is a value the run record
+cannot recover. The record gets the module's SHA-256 as well as the preset name, because
+the preset name alone does not pin the values.
+
+**Multi-GPU here is Lightning's, not `factorize.multigpu`'s.** The post-hoc stages are
+inference loops with no `Trainer`, so they own the process group and drive it through
+`multigpu`; training hands it to scvi, and Lightning owns it. Calling `multigpu.init()`
+first is the one thing not to do. Launch it directly and Lightning spawns; launch it
+under `torchrun` or `srun` and the trainer detects that, derives `devices`/`num_nodes`
+from the launcher, and refuses a config that names a different device count.
+
+Five ways a distributed fit finishes and means something else, each of which this module
+turns into an error or a recorded number:
+
+| | what happens | what it does |
+|---|---|---|
+| strategy not passed to `train()` | scvi decides on the `DistributedSampler` by `"ddp" in strategy` and nothing else | every rank iterates every cell |
+| `early_stopping` with DDP | scvi disables it and warns | the run silently trains the full `max_epochs` |
+| unset `seed` | each rank draws its own train/validation split | every held-out cell is another rank's training cell |
+| `batch_size` read as global | it is per device | 4×128 is a 512 batch, and the LR/KL schedules are per step |
+| code after `train()` | the subprocess launcher re-executes the script | the save and the record run `world_size` times |
+
+`find_unused_parameters=False` is the one knob here that is a speed choice rather than a
+correctness one: it drops `ddp` in place of `ddp_find_unused_parameters_true`, so DDP
+stops walking the autograd graph before each reduction looking for parameters that got no
+gradient. Worth trying, because being wrong costs a raise in the *first* backward pass
+rather than a wrong answer at the last epoch — with the one caveat that a parameter used
+on some steps and not others hangs instead of raising.
+
+Nothing downstream reads a fit without `fit.meta.json`, so the trainer writes it, from the
+same config that made the choices. If the trainer's own world size does not match what was
+asked for, the checkpoint is saved and the record deliberately is **not** — `fit_meta`
+then refuses the directory rather than handing on a plausible fit nobody knows is wrong.
+
 ## Reading a finished run
 
 ```python
@@ -124,6 +194,7 @@ lazily. Heavy dependencies are confined by directory:
 | module | needs |
 |---|---|
 | `factorize/model.py`, `factorize/multigpu.py` | `torch`, `scvi-tools` (function-local) |
+| `factorize/train.py` | `torch`, `scvi-tools`, `anndata` — all function-local, and checked |
 | `viz/` | `matplotlib`, `seaborn` (function-local) |
 | `io/h5ad.py` | `h5py` at module scope — it *is* the h5ad reader |
 | `io/artifacts.py` | `h5py`, function-local, so it imports without one |

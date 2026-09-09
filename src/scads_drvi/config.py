@@ -144,8 +144,14 @@ class Project:
 
     @classmethod
     def from_env(cls, **overrides) -> Project:
-        """Build from ``$SCADS_DRVI_ROOT``, falling back to the working directory."""
-        root = os.environ.get(ROOT_ENV_VAR) or Path.cwd()
+        """Build from ``$SCADS_DRVI_ROOT``, falling back to the working directory.
+
+        ``root`` is an override like any other. Taking it out of ``overrides`` rather
+        than leaving it to collide is not cosmetic: ``from_env(root=...)`` is the obvious
+        way to write "the environment, but here", and it raised ``TypeError: got multiple
+        values for keyword argument 'root'`` from inside the constructor.
+        """
+        root = overrides.pop("root", None) or os.environ.get(ROOT_ENV_VAR) or Path.cwd()
         return cls(root=root, **overrides)
 
     @classmethod

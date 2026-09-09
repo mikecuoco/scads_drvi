@@ -136,3 +136,15 @@ def test_replace_and_as_dict_round_trip(tmp_path):
     as_dict = proj.as_dict()
     assert as_dict["root"] == str(tmp_path.resolve())
     assert isinstance(as_dict["root"], str)
+
+
+def test_from_env_takes_root_as_an_override(tmp_path, monkeypatch):
+    """`from_env(root=...)` is the obvious way to write "the environment, but here".
+
+    It used to raise `TypeError: got multiple values for keyword argument 'root'` from
+    inside the constructor, because `root` was passed positionally *and* splatted.
+    """
+    monkeypatch.setenv("SCADS_DRVI_ROOT", str(tmp_path / "from_the_environment"))
+    assert Project.from_env().root == tmp_path / "from_the_environment"
+    assert Project.from_env(root=tmp_path / "explicit").root == tmp_path / "explicit"
+    assert Project.from_env(root=None).root == tmp_path / "from_the_environment"

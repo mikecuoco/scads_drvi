@@ -40,6 +40,13 @@ CORE_MODULES = [
     "scads_drvi.enrich.binary",
     "scads_drvi._util.advise",
     "scads_drvi._util.progress",
+    # The trainer is here despite being the one module whose job is to *run* torch and
+    # scvi. Its argument guard, its launch resolution and its config checks all have to
+    # be able to reject a bad preset in an environment carrying neither -- rather than
+    # after a minute of imports, or worse, inside a GPU allocation that is already
+    # ticking. Every torch and scvi import in it is function-local for that reason, and
+    # this is what keeps it that way.
+    "scads_drvi.factorize.train",
 ]
 
 # Deliberately absent, each for a reason rather than an oversight. Listed so that adding
@@ -47,7 +54,8 @@ CORE_MODULES = [
 #
 #   scads_drvi.io.h5ad        module-scope h5py -- it exists to read backed h5ad files
 #   scads_drvi.io.contract    imports io.h5ad
-#   scads_drvi.factorize.*    torch / scvi-tools
+#   scads_drvi.factorize.model / .kernels / .multigpu
+#                             torch / scvi-tools; `.train` is in the list above instead
 #   scads_drvi.viz.*          matplotlib / seaborn
 #   scads_drvi.enrich.config  module-scope numpy, pandas and yaml
 #   scads_drvi._util.presets  argparse CLI plumbing, not part of the library surface
