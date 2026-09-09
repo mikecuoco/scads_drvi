@@ -55,6 +55,10 @@ class FitMeta:
 
     n_latent: int
     batch_key: str | None = None
+    #: Which matrix the fit was trained on. None is ``adata.X``, the historical case --
+    #: a fit trained on a layer and re-registered without it loads without complaint and
+    #: then returns latents for a different matrix.
+    layer: str | None = None
     min_fragment: int | None = None
     depth_col: str | None = None
     n_cells: int | None = None
@@ -204,8 +208,15 @@ def load_fit(
 def setup_anndata_like(adata, meta: FitMeta) -> None:
     """Register `adata` the way the fit was registered.
 
-    The batch key comes from the fit record. Registering with a different one, or none,
-    loads without complaint and then returns latents conditioned on the wrong covariate.
+    The batch key and the layer both come from the fit record. Registering with a
+    different batch key, or none, loads without complaint and then returns latents
+    conditioned on the wrong covariate; registering the wrong matrix is the same failure
+    one level down.
+
+    :func:`scads_drvi.factorize.train.prepare_adata` calls this too, so a fit is
+    registered for training by the same code that re-registers it for reading. Older
+    records carry no ``layer`` key, which reads back as None -- ``adata.X`` -- which is
+    what those fits were trained on.
     """
     from scvi.external import DRVI
 
@@ -214,7 +225,13 @@ def setup_anndata_like(adata, meta: FitMeta) -> None:
             f"this fit was trained with batch_key={meta.batch_key!r}, which is not a "
             f"column of the supplied obs. The model cannot be loaded against it."
         )
-    DRVI.setup_anndata(adata, layer=None, batch_key=meta.batch_key)
+    if meta.layer is not None and meta.layer not in getattr(adata, "layers", {}):
+        raise KeyError(
+            f"this fit was trained on layers[{meta.layer!r}], which the supplied AnnData "
+            f"does not have. Registering it against X would load and then answer for a "
+            f"different matrix."
+        )
+    DRVI.setup_anndata(adata, layer=meta.layer, batch_key=meta.batch_key)
 
 
 def latent(

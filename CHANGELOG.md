@@ -6,6 +6,30 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- `factorize.train` — the missing end of the pipeline. The package could load a fit and
+  refused to work without a `fit.meta.json` that nothing in it wrote; this fits the DRVI
+  and writes that record, from the same config object that made the choices. Runs on one
+  GPU, on several through Lightning's own launcher, or under an external `torchrun` /
+  `srun`, which it detects and derives `devices`/`num_nodes` from rather than fighting.
+  `python -m scads_drvi.factorize.train <preset> --config <module>` is the command; only
+  the preset name and the module are reachable from the command line.
+
+  The five silent-success modes of a distributed fit are each an error or a recorded
+  number: a strategy that never reaches `train()` (scvi decides on the
+  `DistributedSampler` by `"ddp" in strategy` and nothing else, so every rank would
+  iterate every cell), `early_stopping` under DDP (scvi disables it and warns), an unset
+  seed (each rank splits train/validation itself), `batch_size` read as global rather
+  than per device, and post-`train()` code running on every rank. A world size that does
+  not match what was asked for saves the checkpoint and deliberately withholds the
+  record, so `fit_meta` refuses the directory instead of passing on a plausible fit.
+
+  `find_unused_parameters` selects between `ddp_find_unused_parameters_true` and `ddp` —
+  the speed/compatibility trade-off on DDP's search for parameters that receive no
+  gradient. It is the one knob here whose wrong setting fails loudly and early.
+- `FitMeta.layer`, recorded by the trainer and used by `setup_anndata_like`. A fit trained
+  on a layer and re-registered against `X` loads without complaint and then answers for a
+  different matrix; `setup_anndata_like` hardcoded `layer=None`. Absent from older
+  records, which reads back as None — what those fits were trained on.
 - `enrich.annotations` — widens a thin annotation into the full `CHR BP SNP CM + K`
   form `--overlap-annot` requires, and works around the reader's integer type inference.
   This is what unblocks the Rust S-LDSC swap: with it, `--overlap-annot` runs and writes a
@@ -17,6 +41,10 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (numpy 1.26 / pandas 2.1), and a current stack with h5py and plotting.
 
 ### Fixed
+- `Project.from_env(root=...)` raised `TypeError: got multiple values for keyword argument
+  'root'` from inside the constructor. `root` was passed positionally *and* splatted from
+  `**overrides`, so the obvious way to write "the environment, but here" was the one way
+  that did not work. Found by the trainer's `--root`.
 - `io.h5ad.read_obs` indexed the category table with anndata's raw codes, so a **missing**
   categorical (code `-1`) came back carrying the *last* category's name instead of NaN.
   It was a second, divergent copy of the decode in `io.artifacts.read_obs` — which was
