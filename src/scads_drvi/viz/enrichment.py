@@ -50,12 +50,16 @@ def heritability_landscape(
     ramp=None,
     q_column: str = "fdr_q",
     z_column: str = Z_COLUMN,
+    alpha: float = 0.05,
 ) -> tuple[Figure, tuple[Axes, Axes]]:
     """Ranked z-scores and a volcano, sharing one significance ramp.
 
     The BH boundary is recomputed from this run's q-values rather than drawn at a
     remembered z -- that number depends on the whole p-vector, so one copied from a
     previous run is wrong for this one.
+
+    `alpha` is passed to both the boundary and its label, so the line and the text naming
+    it cannot be set at different levels.
     """
     import matplotlib.pyplot as plt
 
@@ -82,7 +86,7 @@ def heritability_landscape(
     z = frame[z_column].to_numpy(dtype=float)
     q = frame[q_column].to_numpy(dtype=float)
     colors = significance_colors(q, ramp=ramp)
-    boundary = bh_threshold_z(q, z)
+    boundary = bh_threshold_z(q, z, alpha=alpha)
 
     fig, (bars, volcano) = plt.subplots(1, 2, figsize=(9.5, 3.6))
 
@@ -92,7 +96,11 @@ def heritability_landscape(
     bars.set_ylabel("coefficient z")
     bars.set_xticks([])
     add_threshold_lines(
-        bars, z=(Z_NOMINAL_ONE_TAILED, Z_HIGH_CONFIDENCE), axis="y", bh=boundary
+        bars,
+        z=(Z_NOMINAL_ONE_TAILED, Z_HIGH_CONFIDENCE),
+        axis="y",
+        bh=boundary,
+        alpha=alpha,
     )
     for slot in range(min(top_n, len(z))):
         bars.annotate(

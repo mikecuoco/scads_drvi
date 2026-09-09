@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Config loader + factor selection for arm 05 (SCADS-style enrichment).
+"""Config loader and factor selection for the enrichment stage.
 
-Mirrors peak_config.py's role in arm 02: config.yaml is the single source of
-truth and this module is the only thing that reads it on the Python side.
+The caller's config file is the single source of truth and this module is the
+only thing that reads it on the Python side.
 
 The one algorithm with real content here is factor selection, and it is a
 STAGE rather than a loop filter. K_eff sets the annotation column count, the
@@ -11,7 +11,11 @@ empirical-Bayes shrinkage is fitted over -- a vanished dimension left in that
 pool moves every other factor's shrunk estimate. So it is resolved once, here,
 and everything downstream keys on the factor_map.tsv this writes.
 
-env: scads (pyyaml, pandas, numpy)
+**This module imports numpy, pandas and yaml at module scope**, and is the only
+one in the package that does. That is deliberate rather than an oversight: it is
+reachable only from an environment that already carries all three, so the lazy
+convention the rest of the package follows would buy nothing here.
+tests/test_import_surface.py records the exemption.
 """
 from __future__ import annotations
 
@@ -28,7 +32,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-# `log` and `normalize_peak_name` are re-exported: arm-05 scripts import them from here.
+# `log` and `normalize_peak_name` are re-exported: enrichment scripts import them here.
 # `run` used to be re-exported alongside them and was never called by anything, so it is
 # gone rather than carried forward.
 from scads_drvi._util.progress import log_out as log  # noqa: F401  (re-exported)
@@ -37,13 +41,13 @@ from scads_drvi.io.peaks import normalize_peak_name  # noqa: F401  (re-exported)
 #: Environment variable naming the enrichment config, for callers with no better handle.
 CONFIG_ENV_VAR = "SCADS_DRVI_ENRICH_CONFIG"
 
-#: Contract filenames written by every factorize backend. See CLAUDE.md's
-#: "factorize contract" -- arm 05 consumes exactly these two plus sumstats.
+#: Contract filenames written by every factorize backend. The enrichment stage consumes
+#: exactly these two, plus the GWAS summary statistics.
 LOADINGS_TSV = "topic_loadings.tsv"
 FACTORS_TSV = "topic_factors.tsv"
 
-#: DRVI's set_latent_dimension_stats output, written by inspect_drvi.py's
-#: `latent` stage. The `vanished` flags live here and nowhere else.
+#: DRVI's set_latent_dimension_stats output, written by the fit's inspection stage.
+#: The `vanished` flags live here and nowhere else.
 LATENT_STATS_TSV = "latent_stats.tsv"
 
 
@@ -73,9 +77,8 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
 
     `path` may be omitted only if ``$SCADS_DRVI_ENRICH_CONFIG`` is set. There is no
     built-in default: this module used to sit beside one particular ``config.yaml`` and
-    default to it, which made the package's behaviour depend on its own location. An arm
-    that has a canonical config supplies the path (see
-    ``code/05_enrich/scads_config.py``, which does exactly that).
+    default to it, which made the package's behaviour depend on its own location. A
+    caller that has a canonical config supplies the path.
     """
     if path is None:
         path = os.environ.get(CONFIG_ENV_VAR)
@@ -114,11 +117,12 @@ def ldsc_script(cfg: dict[str, Any], name: str) -> Path:
     if not path.exists():
         raise FileNotFoundError(
             f"{name} not found at {path}.\n"
-            "Build the LDSC env (environment/postInstall does all three steps):\n"
-            "  mamba env create -f environment/env-ldsc.yaml -p /scratch/envs/ldsc\n"
-            "  /scratch/envs/ldsc/bin/pip install --no-deps "
-            "'git+https://github.com/CBIIT/ldsc@b860edf3898318066eeb307b758e180040b611af'\n"
-            "  python environment/patch_ldsc.py /scratch/envs/ldsc"
+            f"Point $SCADS_LDSC_ENV (or cfg['envs']['ldsc']) at a prefix whose bin/ "
+            f"carries the Python LDSC entry points, installed with --no-deps from\n"
+            f"  git+https://github.com/CBIIT/ldsc"
+            f"@b860edf3898318066eeb307b758e180040b611af\n"
+            f"and patched for the two py2->py3 bugs -- see assert_ldsc_patched.\n"
+            f"The Rust ldsc resolved by scads_drvi.enrich.binary needs neither."
         )
     return path
 
@@ -204,8 +208,8 @@ def resolve_annot(cfg: dict[str, Any], width: str) -> dict[str, Any]:
 
     `annot.mode` is a single global value, which is why config_continuous.yaml exists as
     a separate file at all. But the FDR arm needs a per-width setting for a different
-    reason: k48 is binarized from a counterfactual that lsi and subclass_baseline do not
-    have, and forcing every width onto one mode would either break those controls or
+    reason: one width may be binarized from a counterfactual that the control widths do
+    not have, and forcing every width onto one mode would either break those controls or
     require a third config file per arm.
 
     Every consumer -- the builder, the provenance guard, the Snakefile -- must resolve
@@ -258,11 +262,10 @@ def read_latent_stats(path: str | Path) -> pd.DataFrame:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(
-            f"{p} not found -- arm 05 needs DRVI's vanished flags.\n"
-            "Produce it with:\n"
-            "  environment/env-scvi/bin/python code/04_factorize/inspect_drvi.py latent\n"
-            f"(the `latent` preset in code/04_factorize/factorize_config.py; its\n"
-            f"outdir must resolve to {p.parent})"
+            f"{p} not found -- factor selection needs DRVI's vanished flags.\n"
+            f"They come from the fit's inspection stage (DRVI's\n"
+            f"set_latent_dimension_stats), whose output directory must resolve to\n"
+            f"{p.parent}."
         )
     df = pd.read_csv(p, sep="\t")
     missing = {"dim", "vanished"} - set(df.columns)
@@ -483,8 +486,8 @@ def assert_annot_matches_config(cfg: dict[str, Any], odir: str | Path,
 def parse_peaks(index: Iterable[str]) -> pd.DataFrame:
     """Split canonical chr:start-end names into a chrom/start/end frame.
 
-    Coordinates are returned as the peak name states them, which for arm 02/04
-    output is 0-based half-open (BED), matching what merge_peaks wrote.
+    Coordinates are returned as the peak name states them, which for this pipeline's
+    output is 0-based half-open (BED), matching what the peak merge wrote.
     """
     chrom, start, end = [], [], []
     for name in index:

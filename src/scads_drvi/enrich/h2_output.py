@@ -5,8 +5,8 @@ no ``.log`` -- and prints the per-category table to stdout instead. The Python o
 behaved similarly enough that the pipeline already had to recover coefficients by
 parsing a log; this is the same job against a different, better-defined format.
 
-Measured against the Python output for the same inputs (arm ``k96_ind_exp_split``,
-factor ``k1``, trait ``bellenguez``): the coefficient agrees to every printed digit
+Measured against the Python output for the same inputs -- one split-contract arm, its
+first factor, one GWAS trait -- the coefficient agrees to every printed digit
 (``-2.3707e-17``), as do the total h2 (``0.0260`` vs ``0.026``) and the annotation count
 (98).
 

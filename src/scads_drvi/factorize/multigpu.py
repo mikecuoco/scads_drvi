@@ -1,22 +1,18 @@
 #!/usr/bin/env python3
-"""Single-node multi-GPU plumbing for arm 04's post-hoc scripts, via `torchrun`.
+"""Single-node multi-GPU plumbing for the post-hoc factorization stages, via `torchrun`.
 
-Four scripts (`ood_drvi.py`, `ind_drvi.py`, `pseudobulk_drvi.py`,
-`counterfactual_drvi.py`) each held a near-identical copy of this. They are inference loops
+Four post-hoc scripts each held a near-identical copy of this. They are inference loops
 with no Lightning `Trainer`, so `torch.distributed` directly is the right fit -- and one copy
 rather than four is the point, because the staging barrier below is the kind of thing that
 gets fixed in one file and forgotten in the other three.
 
-**No torch at module scope.** Every function imports it locally, the same convention
-`lsi_gpu`, `embed_umap`, `embed_metrics`, `stage` and `progress` follow. That is load-bearing:
-the callers put an argument guard ABOVE their heavy imports so a stray argv token cannot
-silently start a multi-hour job, and that guard has to fire under `env-scads`, which has
-neither torch nor a compiled HDF5. `code/tests/test_lsi_gpu.py::TestExtractionContract` pins
-it.
+**No torch at module scope.** Every function imports it locally. That is load-bearing: a
+caller puts its argument guard ABOVE its heavy imports so a stray argv token cannot
+silently start a multi-hour job, and that guard has to fire in an environment carrying
+neither torch nor a compiled HDF5.
 
-Named `multigpu`, not `dist`: `code/common` is `sys.path[0]` for these scripts and
-`torch.distributed` is universally aliased `dist`, so that name invites exactly the shadowing
-CLAUDE.md warns about.
+Named `multigpu`, not `dist`: these scripts run with their own directory on `sys.path`,
+and `torch.distributed` is universally aliased `dist`, so that name invites shadowing.
 """
 from __future__ import annotations
 

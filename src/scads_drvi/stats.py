@@ -141,13 +141,23 @@ def compare_bh(p, n: int | None = None) -> pd.DataFrame:
     )
 
 
-def bh_threshold_z(q, z, *, alpha: float = 0.05) -> float | None:
-    """The smallest z still passing BH at `alpha`, or None if nothing passes.
+def bh_threshold_z(
+    q, z, *, alpha: float = 0.05, tail: Tail = "upper"
+) -> float | None:
+    """The least extreme z still passing BH at `alpha`, or None if nothing passes.
 
     For drawing a significance line on an axis whose units are z. Computing it beats
     hardcoding one: the boundary depends on the whole p-vector, so a number copied from
     a previous run is wrong for this one.
+
+    `tail` must match the tail the p-values were computed under. Under ``upper`` the
+    boundary is the smallest passing z; under ``lower`` it is the largest. Taking the
+    minimum either way puts the line on the wrong side of the distribution and, because
+    it is still a real z from the data, it looks entirely plausible there.
     """
+    if tail not in ("upper", "lower"):
+        raise ValueError(f"tail must be 'upper' or 'lower', got {tail!r}")
+
     q = np.asarray(q, dtype=float)
     z = np.asarray(z, dtype=float)
     if q.shape != z.shape:
@@ -155,7 +165,7 @@ def bh_threshold_z(q, z, *, alpha: float = 0.05) -> float | None:
     passing = np.isfinite(q) & np.isfinite(z) & (q < alpha)
     if not passing.any():
         return None
-    return float(z[passing].min())
+    return float(z[passing].min() if tail == "upper" else z[passing].max())
 
 
 def add_fdr(

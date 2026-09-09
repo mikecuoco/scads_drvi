@@ -19,10 +19,38 @@ import textwrap
 import pytest
 
 # Modules that must import with none of the heavy dependencies present.
+#
+# This list is the enforcement of the README's claim that "the enrichment stages run with
+# no torch, no matplotlib, no seaborn and no h5py, and must still import and use the
+# loaders, statistics and scoring". It previously named only the top level and `config`,
+# so a module-level `import matplotlib` added to, say, `scores.cell` would have passed CI
+# while breaking the environment this test exists to protect.
 CORE_MODULES = [
     "scads_drvi",
     "scads_drvi.config",
+    "scads_drvi.labels",
+    "scads_drvi.stats",
+    "scads_drvi.scores.cell",
+    "scads_drvi.scores.aggregate",
+    "scads_drvi.io.artifacts",
+    "scads_drvi.io.peaks",
+    "scads_drvi.enrich.ldsc",
+    "scads_drvi.enrich.h2_output",
+    "scads_drvi.enrich.annotations",
+    "scads_drvi.enrich.binary",
+    "scads_drvi._util.advise",
+    "scads_drvi._util.progress",
 ]
+
+# Deliberately absent, each for a reason rather than an oversight. Listed so that adding
+# a module here is a decision someone made, not a gap nobody noticed:
+#
+#   scads_drvi.io.h5ad        module-scope h5py -- it exists to read backed h5ad files
+#   scads_drvi.io.contract    imports io.h5ad
+#   scads_drvi.factorize.*    torch / scvi-tools
+#   scads_drvi.viz.*          matplotlib / seaborn
+#   scads_drvi.enrich.config  module-scope numpy, pandas and yaml
+#   scads_drvi._util.presets  argparse CLI plumbing, not part of the library surface
 
 BLOCKED = ("torch", "scvi", "matplotlib", "seaborn", "h5py", "anndata")
 

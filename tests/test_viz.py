@@ -159,6 +159,17 @@ class TestThresholdLines:
         with pytest.raises(ValueError, match="'x' or 'y'"):
             add_threshold_lines(ax, axis="z")
 
+    def test_the_bh_label_names_the_alpha_it_was_drawn_at(self):
+        """The label used to be the literal 0.05 whatever alpha was in use."""
+        fig, ax = plt.subplots()
+        add_threshold_lines(ax, bh=2.9, alpha=0.01)
+        assert "BH q < 0.01" in [line.get_label() for line in ax.lines]
+
+    def test_the_bh_label_still_defaults_to_05(self):
+        fig, ax = plt.subplots()
+        add_threshold_lines(ax, bh=2.9)
+        assert "BH q < 0.05" in [line.get_label() for line in ax.lines]
+
 
 class TestBoxStats:
     def test_whiskers_are_at_the_quartiles_by_default(self):
@@ -172,6 +183,34 @@ class TestBoxStats:
         stats = box_stats(np.arange(100.0), whis="1.5iqr")
         assert stats.whislo[0] <= stats.q1[0]
         assert stats.whishi[0] >= stats.q3[0]
+
+    def test_iqr_whiskers_never_leave_the_data(self):
+        """A whisker is the most extreme observation inside the fence, not the fence.
+
+        `box_stats_by_column` returned the fence, so a per-factor panel drew a whisker
+        reaching a value the column does not contain.
+        """
+        column = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 100.0])
+        by_column = box_stats_by_column(column.reshape(-1, 1), whis="1.5iqr")
+        scalar = box_stats(column, whis="1.5iqr")
+
+        assert by_column.whishi[0] == pytest.approx(scalar.whishi[0])
+        assert by_column.whislo[0] == pytest.approx(scalar.whislo[0])
+        assert by_column.whishi[0] in column
+        assert by_column.whislo[0] in column
+
+    def test_both_entry_points_refuse_an_unknown_whis(self):
+        """`box_stats_by_column` silently treated any unknown value as 1.5iqr."""
+        with pytest.raises(ValueError, match="unknown whis"):
+            box_stats(np.arange(10.0), whis="not-a-mode")
+        with pytest.raises(ValueError, match="unknown whis"):
+            box_stats_by_column(np.arange(10.0).reshape(-1, 1), whis="not-a-mode")
+
+    def test_an_all_nan_column_falls_back_to_the_quartile(self):
+        matrix = np.full((4, 1), np.nan)
+        stats = box_stats_by_column(matrix, whis="1.5iqr")
+        assert np.isnan(stats.whislo[0]) and np.isnan(stats.whishi[0])
+        assert stats.n[0] == 0
 
     def test_groups_become_boxes(self):
         values = np.arange(30.0)

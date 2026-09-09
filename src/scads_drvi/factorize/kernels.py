@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Pure selection/overlap kernels for arm 04. stdlib + numpy only, which is what lets
-both notebook kernels and the pytest env import the identical code. 26 tests in
-code/tests/test_drvi_features.py.
+"""Pure selection and interval-overlap kernels for the factorization stage.
+
+stdlib + numpy only, which is what lets a notebook kernel and the pytest environment
+import the identical code.
 """
 
 
@@ -64,7 +65,7 @@ def map_summits(chrom_idx, cons_start, cons_end, q_chrom, q_summit):
 def scatter_max_overlap(chrom_idx, cons_start, cons_end, q_chrom, q_start, q_end,
                         q_val, out_col):
     """Map called peaks to consensus peaks by interval OVERLAP, not summit
-        containment. merge_peaks recenters on the WINNING subclass's summit, so a non-winning
+        containment. Peak merging recenters on the WINNING group's summit, so a non-winning
         summit often falls outside the retained window -- and how often depends on the width
         (14.3% unmapped at 501 bp vs 6.9% at 1001 bp), which would bias the two widths
         differently. Overlap gives 0.000% at both. Strongest call wins, not last write.

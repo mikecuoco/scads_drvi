@@ -165,6 +165,21 @@ class TestThresholdZ:
         with pytest.raises(ValueError, match="same shape"):
             bh_threshold_z(np.array([0.1]), np.array([1.0, 2.0]))
 
+    def test_lower_tail_takes_the_largest_passing_z(self):
+        """Under a lower-tail test the boundary is the LEAST negative passing z.
+
+        Taking the minimum there returns a real z from the data, on the wrong side of
+        the distribution, which is why this was invisible.
+        """
+        q = np.array([0.01, 0.04, 0.20])
+        z = np.array([-4.0, -3.1, -1.0])
+        assert bh_threshold_z(q, z, tail="lower") == pytest.approx(-3.1)
+        assert bh_threshold_z(q, z, tail="upper") == pytest.approx(-4.0)
+
+    def test_unknown_tail_is_refused(self):
+        with pytest.raises(ValueError, match="upper.*lower"):
+            bh_threshold_z(np.array([0.01]), np.array([3.0]), tail="both")
+
 
 class TestAddFdr:
     def _frame(self):

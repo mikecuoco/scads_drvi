@@ -242,6 +242,7 @@ def add_threshold_lines(
     axis: str = "y",
     label: bool = True,
     bh: float | None = None,
+    alpha: float = 0.05,
     color: str = "#949494",
 ) -> None:
     """Draw significance reference lines consistently on one axis.
@@ -249,6 +250,11 @@ def add_threshold_lines(
     `bh` is a data-derived boundary (see ``stats.bh_threshold_z``) and is drawn
     differently from the fixed conventions, because it is a property of this run rather
     than a constant.
+
+    `alpha` is the level `bh` was computed at, and exists only to label the line. It was
+    previously the literal ``0.05`` in the label string, so a caller correcting at any
+    other level got a line annotated with a threshold it was not drawn at -- the same
+    class of drift the frozen :class:`SignificanceRamp` above exists to prevent.
     """
     if axis not in ("x", "y"):
         raise ValueError(f"axis must be 'x' or 'y', got {axis!r}")
@@ -268,5 +274,5 @@ def add_threshold_lines(
             color="#D55E00",
             linestyle="--",
             linewidth=0.9,
-            label="BH q < 0.05" if label else None,
+            label=f"BH q < {alpha:g}" if label else None,
         )

@@ -15,6 +15,7 @@ implicit would let a reader mistake a quartile whisker for a range.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
@@ -24,9 +25,13 @@ import numpy as np
 if TYPE_CHECKING:  # pragma: no cover
     pass
 
-__all__ = ["BoxStats", "box_stats", "box_stats_by_column", "draw_boxes"]
+__all__ = ["WHIS_KINDS", "BoxStats", "box_stats", "box_stats_by_column", "draw_boxes"]
 
 Whis = Literal["quartile", "1.5iqr", "minmax"]
+
+#: The whisker conventions both entry points accept. One tuple, so `box_stats` and
+#: `box_stats_by_column` cannot come to disagree about what is a valid argument.
+WHIS_KINDS: tuple[str, ...] = ("quartile", "1.5iqr", "minmax")
 
 
 @dataclass(frozen=True)
@@ -116,7 +121,7 @@ def _whiskers(values: np.ndarray, q1: float, q3: float, whis: Whis) -> tuple[flo
             float(low.min()) if low.size else q1,
             float(high.max()) if high.size else q3,
         )
-    raise ValueError(f"unknown whis {whis!r}")
+    raise ValueError(f"unknown whis {whis!r}; choose from {list(WHIS_KINDS)}")
 
 
 def box_stats(
@@ -210,14 +215,36 @@ def box_stats_by_column(
             f"{len(labels)} labels for {array.shape[1]} columns"
         )
 
-    q1, med, q3 = np.nanpercentile(array, [25, 50, 75], axis=0)
-    if whis == "quartile":
-        whislo, whishi = q1, q3
-    elif whis == "minmax":
-        whislo, whishi = np.nanmin(array, axis=0), np.nanmax(array, axis=0)
-    else:
-        iqr = q3 - q1
-        whislo, whishi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    if whis not in WHIS_KINDS:
+        raise ValueError(f"unknown whis {whis!r}; choose from {list(WHIS_KINDS)}")
+
+    # A column with no finite value is a legitimate input -- a factor scored nowhere --
+    # and every statistic below is NaN for it by design. numpy says so with an "All-NaN
+    # slice" RuntimeWarning per column, which at 96 factors is noise, not information.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "All-NaN slice encountered", RuntimeWarning)
+        warnings.filterwarnings("ignore", "All-NaN axis encountered", RuntimeWarning)
+
+        q1, med, q3 = np.nanpercentile(array, [25, 50, 75], axis=0)
+        if whis == "quartile":
+            whislo, whishi = q1, q3
+        elif whis == "minmax":
+            whislo, whishi = np.nanmin(array, axis=0), np.nanmax(array, axis=0)
+        else:
+            # The whisker is the most extreme observation INSIDE the fence, not the
+            # fence itself. This branch used to return `q1 - 1.5*iqr, q3 + 1.5*iqr`
+            # directly, which draws a whisker reaching a value the data does not
+            # contain -- and disagreed with `_whiskers`, which every `box_stats` box
+            # goes through.
+            iqr = q3 - q1
+            inside_low = np.where(array >= q1 - 1.5 * iqr, array, np.nan)
+            inside_high = np.where(array <= q3 + 1.5 * iqr, array, np.nan)
+            whislo = np.nanmin(inside_low, axis=0)
+            whishi = np.nanmax(inside_high, axis=0)
+            # Nothing inside the fence (an empty or all-NaN column) falls back to the
+            # quartile, matching `_whiskers`.
+            whislo = np.where(np.isnan(whislo), q1, whislo)
+            whishi = np.where(np.isnan(whishi), q3, whishi)
 
     return BoxStats(
         labels=tuple(labels),

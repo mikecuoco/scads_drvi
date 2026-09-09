@@ -17,6 +17,30 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (numpy 1.26 / pandas 2.1), and a current stack with h5py and plotting.
 
 ### Fixed
+- `io.h5ad.read_obs` indexed the category table with anndata's raw codes, so a **missing**
+  categorical (code `-1`) came back carrying the *last* category's name instead of NaN.
+  It was a second, divergent copy of the decode in `io.artifacts.read_obs` — which was
+  already correct — and is now deleted rather than repaired; `keep_rows` calls the one
+  remaining decoder. The two also disagreed on an absent column: one raised, one returned
+  `{}`.
+- `viz.frugal.box_stats_by_column(whis="1.5iqr")` returned the **fence**
+  (`q1 - 1.5·IQR`, `q3 + 1.5·IQR`) where `box_stats` returns the most extreme observation
+  *inside* it. On `[0,1,2,3,4,100]` that draws a whisker at 7.5, a value the column does
+  not contain. The two entry points now share one definition.
+- `viz.frugal.box_stats_by_column` silently treated any unrecognised `whis` as `1.5iqr`;
+  `box_stats` raised for the same argument. Both now validate against `WHIS_KINDS`.
+- `scores.aggregate.block_order` returned a `names` list and a `spans` list that disagreed
+  when a block was NaN — `sort_values` keeps such a row, `groupby` dropped it. Since the
+  spans index `names` positionally, every block label after the gap was shifted, silently,
+  in the figure. Spans now cover every name, and the function refuses to return if they
+  ever stop doing so.
+- `viz.color.add_threshold_lines` labelled the BH line `"BH q < 0.05"` whatever level it
+  was drawn at. It takes an `alpha` now, and `viz.enrichment.heritability_landscape`
+  passes the same value to the boundary and to its label — the drift the frozen
+  `SignificanceRamp` exists to prevent, in the one place the ramp did not reach.
+- `stats.bh_threshold_z` returned the smallest passing z unconditionally, which is the
+  wrong end of the distribution for a lower-tail test. It takes `tail` now, matching
+  `add_fdr` and `p_one_tailed`.
 - A closure in `enrich.config` read `key` from the enclosing loop rather than binding it.
   Correct today only because `re.sub` happens to call it synchronously within the same
   iteration — a property of the caller, not of the function.
@@ -28,6 +52,26 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   serve are resolved by the module-level `TYPE_CHECKING` import.
 
 ### Changed
+- `tests/test_import_surface.py` checks 14 modules where it checked 2. Its docstring and
+  the README both claimed the whole loaders / statistics / scoring surface imports with no
+  torch, matplotlib, seaborn or h5py, but only the top level and `config` were tested — a
+  module-level `import matplotlib` added to `scores.cell` would have passed CI. Every
+  newly listed module already passed; the modules left out are now listed with a reason
+  each, so an omission is a decision rather than a gap.
+- The README's genericity claim is scoped to what the scan actually enforces: docstrings
+  are exempt by design (`tests/conftest.py`), so the guarantee is "no dataset-specific
+  value or name", and clean docstrings are a convention. Two docstrings naming a GWAS
+  study and a specific arm were rewritten to keep their measurements and drop the names.
+- Cross-references to the capsule this package was extracted from — `code/common/`,
+  `code/tests/…`, `environment/env-ldsc.yaml`, `CLAUDE.md`, "arm 0N" — are gone from the
+  modules that carried them. Two error messages had been instructing users to run build
+  steps that do not exist in this repository; they now state the requirement instead.
+  Notes that reference the origin as *history* are kept, because they are accurate.
+- `enrich.annotations.force_decimal`'s docstring said `columns` defaults to every column
+  except the identifiers; it excludes only `CHR` and `SNP`, so `BP` is written as
+  `1000.0`. The docstring now says so. **Behaviour unchanged** — whether a float `BP`
+  matters to the Rust reader is untested here and worth checking against a real
+  `--overlap-annot` run.
 - Adopting the linter rewrote 144 mechanical items across the package: unnecessary quoted
   annotations, deprecated `typing` imports, import order.
 

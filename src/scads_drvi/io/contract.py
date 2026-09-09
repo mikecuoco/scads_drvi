@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The arm-05 factorize contract, asserted. CLAUDE.md "The factorize contract".
+"""The factorize contract, asserted.
 
 Non-negativity is a hard requirement, not a convention: annotations are a top-frac RANK, so a
 negative sorts last instead of "most extreme the other way". Two scripts write different
@@ -22,11 +22,12 @@ from scads_drvi.io.peaks import (
 
 
 def check_contract(outdir: Path, latent_stats: Path | None = None, log_fn=None) -> dict:
-    """Assert the emitted files are the contract arm 05 expects.
+    """Assert the emitted files are the contract the enrichment stage expects.
 
-        `latent_stats` is a parameter because arm 04 has TWO layouts -- inspect_drvi.py writes a
-        SIBLING dir (inspect_k48 beside drvi_k48) while older fits carry <fit>/inspect/ -- and
-        hardcoding the second meant the check could never validate the production fit.
+        `latent_stats` is a parameter because a fit may carry TWO layouts -- the inspection
+        stage writes a SIBLING directory beside the fit, while older fits carry
+        <fit>/inspect/ -- and hardcoding the second meant the check could never validate
+        the production fit.
     """
     import pandas as pd
 
@@ -39,7 +40,7 @@ def check_contract(outdir: Path, latent_stats: Path | None = None, log_fn=None) 
 
     lo = pd.read_csv(outdir / "topic_loadings.tsv", sep="\t", index_col=0)
     assert list(lo.columns) == cols, "loadings columns != dim_0..dim_{K-1}"
-    assert (lo.values >= 0).all(), "topic_loadings has negatives (arm 05 requires >= 0)"
+    assert (lo.values >= 0).all(), "topic_loadings has negatives (annotations require >= 0)"
     assert not lo.isna().any().any(), "NaNs in topic_loadings"
     assert lo.shape == (meta["n_cells"], k), f"loadings {lo.shape} != {(meta['n_cells'], k)}"
 

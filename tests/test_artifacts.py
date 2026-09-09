@@ -55,6 +55,31 @@ class TestReadObs:
         assert str(frame["grouping"].dtype) == "category"
         assert set(frame["grouping"].astype(str)) == {"g0", "g1", "g2"}
 
+    def test_a_missing_categorical_decodes_to_nan_not_the_last_category(self, tmp_path):
+        """anndata writes a missing categorical as code -1.
+
+        Indexing the category table with the raw codes makes -1 select the LAST
+        category, so every unlabelled cell silently acquires the final category's name.
+        A second decoder in io.h5ad did exactly that; this is now the only one.
+        """
+        path = tmp_path / "missing.h5ad"
+        with h5py.File(path, "w") as fh:
+            obs = fh.create_group("obs")
+            obs.attrs["_index"] = "cell_id"
+            obs.create_dataset("cell_id", data=np.array([b"c0", b"c1", b"c2"]))
+            cat = obs.create_group("grouping")
+            cat.create_dataset("categories", data=np.array([b"alpha", b"beta"]))
+            cat.create_dataset("codes", data=np.array([0, -1, 1], dtype="i1"))
+
+        grouping = read_obs(path)["grouping"]
+        assert list(grouping.astype(object).iloc[[0, 2]]) == ["alpha", "beta"]
+        assert pd.isna(grouping.iloc[1])
+
+    def test_io_h5ad_exposes_no_second_obs_decoder(self):
+        """One decode, in one place -- the divergence above is what a copy costs."""
+        h5ad = pytest.importorskip("scads_drvi.io.h5ad")
+        assert not hasattr(h5ad, "read_obs")
+
     def test_index_comes_from_the_file(self, obs_file):
         """anndata records the index name; guessing it is how a join matches nothing."""
         frame = read_obs(obs_file)

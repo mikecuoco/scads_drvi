@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Named parameter sets for the arm 03/04 scripts, loaded from an arm's `*_config.py`.
+"""Named parameter sets for a stage's scripts, loaded from that stage's `*_config.py`.
 
-Replaces argparse for everything except which preset to run. See CLAUDE.md, "Arms 03/04:
-Python config modules".
+Replaces argparse for everything except which preset to run: a value that can be passed on
+the command line is a value a run record cannot recover.
 """
 from __future__ import annotations
 
@@ -40,8 +40,9 @@ def find_config(script: Path) -> Path:
 def load_module(config: Path):
     """Import a config module BY PATH.
 
-        Never via `sys.path`: the scripts already insert `code/common` at sys.path[0], so an
-        arm module resolved by name could be shadowed by, or shadow, another module there.
+        Never via `sys.path`: these scripts already insert their shared directory at
+        sys.path[0], so a config module resolved by name could be shadowed by, or shadow,
+        another module there.
         A path import cannot collide. `sys.modules` is populated so dataclasses defined in the
         module pickle and `replace()` cleanly.
     """

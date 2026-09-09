@@ -184,6 +184,24 @@ class TestBlockOrder:
         with pytest.raises(KeyError, match="not in the summary"):
             block_order(stats, group="grouping", block="block")
 
+    def test_a_group_with_no_block_still_falls_inside_a_span(self):
+        """`sort_values` keeps a NaN block; `groupby` used to drop it.
+
+        The spans index `names` positionally, so a group present in `names` and in no
+        span shifts every block label after it -- silently, in the figure.
+        """
+        frame = pd.DataFrame(
+            {
+                "grouping": ["a", "b", "c", "d"],
+                "block": ["B1", "B1", "B2", np.nan],
+                "mean": [1.0, 2.0, 3.0, 4.0],
+            }
+        )
+        names, spans = block_order(frame, group="grouping", block="block")
+        assert len(names) == 4
+        assert sum(stop - start for _, start, stop in spans) == len(names)
+        assert spans[-1][2] == len(names)
+
 
 class TestProfileByGroup:
     @pytest.fixture

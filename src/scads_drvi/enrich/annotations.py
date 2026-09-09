@@ -130,8 +130,16 @@ def force_decimal(
     fails on a value that does not fit. Writing the column as float makes the inference
     unambiguous no matter which rows are sampled.
 
-    `columns` defaults to every column except the identifiers, which are genuinely
-    integral or textual and are read as such.
+    `columns` defaults to every column except ``CHR`` and ``SNP``, which are genuinely
+    integral or textual and are read as such. Note that this **includes** ``BP`` and
+    ``CM``, two of the four :data:`IDENTIFIER_COLUMNS`: ``CM`` is the column the reader
+    actually mis-infers, and ``BP`` follows from the same default, so a widened
+    annotation carries a base position written as ``1000.0`` rather than ``1000``.
+
+    That has not been checked against a real ``--overlap-annot`` run. If a downstream
+    integer parse of ``BP`` ever objects, pass ``columns=["CM"]`` explicitly rather than
+    changing this default -- what gets written into an annotation file should be a
+    deliberate choice at the call site.
     """
     import pandas as pd
 

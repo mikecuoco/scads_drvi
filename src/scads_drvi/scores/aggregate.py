@@ -197,12 +197,25 @@ def block_order(
     ordered = frame.sort_values([block, value], ascending=[True, ascending])
     names = ordered[group].astype(str).tolist()
 
+    # `dropna=False` is load-bearing. `sort_values` KEEPS a row whose block is NaN (at the
+    # end), so without it the group appeared in `names` while belonging to no span -- and a
+    # caller drawing bands and block labels from those spans, as
+    # `viz.enrichment.grouped_landscape` does, mislabelled the axis from that row onwards.
     spans: list[tuple[str, int, int]] = []
     start = 0
-    for block_name, chunk in ordered.groupby(block, sort=True, observed=True):
+    for block_name, chunk in ordered.groupby(
+        block, sort=True, observed=True, dropna=False
+    ):
         stop = start + len(chunk)
         spans.append((str(block_name), start, stop))
         start = stop
+
+    covered = sum(stop - start for _, start, stop in spans)
+    if covered != len(names):
+        raise ValueError(
+            f"{covered} of {len(names)} groups fall inside a block span. The spans index "
+            f"`names` positionally, so a gap silently shifts every block label after it."
+        )
     return names, spans
 
 

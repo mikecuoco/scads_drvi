@@ -8,7 +8,10 @@ grouping, donor-cohort variable, trait, GWAS study or obs column — those are a
 caller-supplied. Two tests enforce that rather than trusting it:
 
 - `tests/test_generic.py` — an AST scan over every module rejecting dataset vocabulary in
-  string literals and identifiers.
+  string literals and identifiers. Docstrings are **exempt** by design (see
+  `tests/conftest.py`): prose may name a domain term as an example, a value used as data
+  may not. So the guarantee is precisely "no dataset-specific *value or name*", and
+  keeping docstrings clean of them is a convention rather than something the scan checks.
 - `tests/test_portability.py` — builds a complete synthetic *plant* single-cell analysis
   (tissues, cultivars, agronomic traits — no shared vocabulary at all) and runs the whole
   chain on it: obs → `Project` → labels → LDSC results → BH → per-cell scores →

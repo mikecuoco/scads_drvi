@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Backed-h5ad readers: CSR row gathers, obs columns, shape. CLAUDE.md "Shared kernels".
+"""Backed-h5ad readers: scattered CSR row gathers, shape, and var names.
 
-No torch at module scope, deliberately: a CPU env must be able to import this.
+No torch at module scope, deliberately: a CPU env must be able to import this. The obs
+decode lives in :mod:`scads_drvi.io.artifacts` and only there -- a second copy here got
+the missing-categorical case wrong for as long as it existed.
 """
 from __future__ import annotations
 
@@ -104,27 +106,6 @@ def read_rows_csr(path: str, rows: np.ndarray, n_vars: int,
     return sorted_mat[inverse]
 
 
-def read_obs(path: str, cols):
-    """Read obs columns out of an h5ad, decoding anndata's categorical encoding."""
-    out = {}
-    with h5py.File(path, "r") as f:
-        obs = f["obs"]
-        for c in cols:
-            if c not in obs:
-                continue
-            node = obs[c]
-            if isinstance(node, h5py.Group):  # categorical
-                cats = node["categories"][:]
-                cats = np.array([x.decode() if isinstance(x, bytes) else x for x in cats])
-                out[c] = cats[node["codes"][:]]
-            else:
-                v = node[:]
-                if v.dtype.kind in "OS":
-                    v = np.array([x.decode() if isinstance(x, bytes) else x for x in v])
-                out[c] = v
-    return out
-
-
 def h5ad_shape(path: str):
     with h5py.File(path, "r") as f:
         return tuple(int(x) for x in f["X"].attrs["shape"])
@@ -143,10 +124,19 @@ def keep_rows(adata_path: str, min_fragment: int, depth_col: str = "n_fragment")
     n_obs, _ = h5ad_shape(adata_path)
     if not min_fragment:
         return np.arange(n_obs), None
-    obs = read_obs(adata_path, [depth_col])
-    if depth_col not in obs:
-        raise SystemExit(f"min_fragment needs obs['{depth_col}'], which is absent")
-    d = np.asarray(obs[depth_col], dtype=np.int64)
+    # io.artifacts.read_obs, not a second decoder here. The copy this replaced indexed
+    # the category table with the raw codes, and anndata writes a MISSING categorical as
+    # code -1 -- which indexes the LAST category, so every unlabelled cell came back
+    # carrying the final category's name instead of NaN.
+    from scads_drvi.io.artifacts import read_obs
+
+    try:
+        frame = read_obs(adata_path, [depth_col])
+    except KeyError as exc:
+        raise SystemExit(
+            f"min_fragment needs obs['{depth_col}'], which is absent"
+        ) from exc
+    d = frame[depth_col].to_numpy(dtype=np.int64)
     rows = np.flatnonzero(d >= min_fragment)
     info = {"min_fragment": int(min_fragment), "depth_col": depth_col,
             "n_cells_available": int(n_obs), "n_cells_kept": int(rows.size),
