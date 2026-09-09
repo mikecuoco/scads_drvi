@@ -49,11 +49,12 @@ the pipeline at the wrong inputs.
 The top level imports nothing heavier than the standard library; public names resolve
 lazily. Heavy dependencies are confined by directory:
 
-| directory | needs |
+| module | needs |
 |---|---|
-| `factorize/model.py` | `torch`, `scvi-tools` |
-| `viz/` | `matplotlib`, `seaborn` |
-| `io/` | `h5py` (function-local only) |
+| `factorize/model.py`, `factorize/multigpu.py` | `torch`, `scvi-tools` (function-local) |
+| `viz/` | `matplotlib`, `seaborn` (function-local) |
+| `io/h5ad.py` | `h5py` at module scope — it *is* the h5ad reader |
+| `io/artifacts.py` | `h5py`, function-local, so it imports without one |
 | everything else | numpy / pandas / scipy / pyyaml |
 
 This is not cosmetic. The environment that runs the enrichment stages has no torch, no
