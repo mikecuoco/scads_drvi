@@ -5,8 +5,37 @@ single-cell ATAC data.
 
 The package is **method-generic**. Nothing in it names a tissue, brain region, cell
 grouping, donor-cohort variable, trait, GWAS study or obs column — those are all
-caller-supplied. `tests/test_generic.py` enforces this with an AST scan over every
-module, so the constraint is checked rather than merely intended.
+caller-supplied. Two tests enforce that rather than trusting it:
+
+- `tests/test_generic.py` — an AST scan over every module rejecting dataset vocabulary in
+  string literals and identifiers.
+- `tests/test_portability.py` — builds a complete synthetic *plant* single-cell analysis
+  (tissues, cultivars, agronomic traits — no shared vocabulary at all) and runs the whole
+  chain on it: obs → `Project` → labels → LDSC results → BH → per-cell scores →
+  aggregation → seven figures. A scan proves no forbidden *names*; this proves no hidden
+  *assumptions*.
+
+## What's in it
+
+| module | role |
+|---|---|
+| `config.Project` | every path, caller-supplied with defaults under one `root` |
+| `labels` | the three names a factor has, and which one may index a matrix |
+| `stats` | one-tailed p, Benjamini–Hochberg, BH-boundary z |
+| `io.artifacts` | obs decode, loadings, embeddings, `load_interpretation` |
+| `io.peaks` / `io.h5ad` / `io.contract` / `io.meta` | peak names, backed-h5ad reads, contract checks, run records |
+| `factorize.model` | load a fit, latent in requested row order, split responsibility |
+| `factorize.kernels` / `.multigpu` | interval kernels, torchrun plumbing |
+| `enrich.binary` | the pinned Rust LDSC: resolve, verify, build safe commands |
+| `enrich.h2_output` | parse what `ldsc h2` prints |
+| `enrich.config` | enrichment config loading and factor selection |
+| `scores.cell` / `.aggregate` | the two `CS_i` formulas; group summaries and matrices |
+| `viz.*` | style, colour policy, frugal boxes, and the figures |
+
+The one consumer is `code/05_enrich/interpretation.ipynb` — one notebook for every arm,
+parameterised by `$SCADS_DRVI_MODEL`, with this dataset's constants in
+`code/05_enrich/seaad_site.py`. It replaced four notebooks totalling 23 MB, three of
+which differed by a single line.
 
 ## Install
 

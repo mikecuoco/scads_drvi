@@ -244,6 +244,27 @@ class TestEnrichmentFigures:
         with pytest.raises(KeyError, match="no results for trait"):
             trait_concordance(results, traits=["t1", "absent"])
 
+    def test_trait_concordance_survives_a_constant_difference(self):
+        """Two traits ranking identically give the delta histogram zero width, which
+        numpy 2 refuses to bin and numpy 1 quietly widened."""
+        rows = []
+        for k in range(8):
+            rows.append({"trait": "a", "dim": f"dim_{k}", "Coefficient_z-score": 1.0 * k})
+            rows.append(
+                {"trait": "b", "dim": f"dim_{k}", "Coefficient_z-score": 1.0 * k + 0.3}
+            )
+        fig, (_, hist) = trait_concordance(pd.DataFrame(rows), traits=["a", "b"])
+        assert isinstance(fig, Figure)
+        assert "+0.30" in hist.get_title()
+
+    def test_trait_concordance_with_a_single_shared_factor(self):
+        rows = [
+            {"trait": "a", "dim": "dim_0", "Coefficient_z-score": 2.0},
+            {"trait": "b", "dim": "dim_0", "Coefficient_z-score": 2.5},
+        ]
+        fig, _ = trait_concordance(pd.DataFrame(rows), traits=["a", "b"])
+        assert isinstance(fig, Figure)
+
     def test_covariate_audit(self, cells):
         fig, axes = covariate_audit(
             cells, value="cs", covariates=["depth"], log_x=["depth"]

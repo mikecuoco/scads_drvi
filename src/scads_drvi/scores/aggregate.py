@@ -181,6 +181,13 @@ def block_order(
     Returns the group order and, per block, its ``(name, start, stop)`` span in that
     order -- which is what a figure needs to draw the alternating background bands and
     the block labels without recomputing the grouping.
+
+    Blocks follow the **column's own order**: a pandas categorical is laid out in its
+    declared category order, anything else lexicographically. That is deliberate -- a
+    categorical carries a meaningful ordering (developmental stage, anatomical
+    position), and re-sorting it alphabetically would discard the one piece of
+    information the dtype exists to record. Pass an already-ordered categorical to
+    control the axis.
     """
     frame = stats.frame if isinstance(stats, GroupStats) else stats
     for column in (group, block, value):

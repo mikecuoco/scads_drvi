@@ -169,7 +169,22 @@ def trait_concordance(
         )
 
     delta = right - left
-    hist.hist(delta, bins=30, color="#949494")
+    # A constant delta -- two traits ranking identically, or a single factor -- gives the
+    # histogram a zero-width range, and numpy 2 raises "Too many bins for data range"
+    # there where numpy 1 quietly widened it.
+    #
+    # The comparison has to be against a TOLERANCE, not against zero: a delta that is
+    # constant in intent still varies by ~1e-16 once the two z-scores have been through
+    # floating-point arithmetic, so `ptp > 0` is true and the range is still unusable.
+    centre = float(np.mean(delta)) if delta.size else 0.0
+    spread = float(np.ptp(delta)) if delta.size else 0.0
+    scale = max(abs(centre), 1.0)
+    if spread > scale * 1e-9:
+        bins = min(30, max(5, delta.size // 2))
+        hist.hist(delta, bins=bins, color="#949494")
+    else:
+        pad = max(abs(centre) * 0.05, 0.05)
+        hist.hist(delta, bins=5, range=(centre - pad, centre + pad), color="#949494")
     hist.axvline(0.0, color="#D55E00", linestyle="--", linewidth=0.9)
     hist.set_xlabel(f"z({traits[1]}) - z({traits[0]})")
     hist.set_ylabel("factors")
