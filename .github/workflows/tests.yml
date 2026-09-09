@@ -38,10 +38,12 @@ jobs:
             python: "3.12"
             deps: numpy pandas scipy pyyaml
 
-          # Mirrors env-qc-notebook: the declared dependency floors.
+          # Mirrors env-qc-notebook: the declared dependency floors. anndata is pinned to
+          # its floor too -- left unpinned it resolved to the same version as `current`, so
+          # the one job that exists to test the floor was not testing that one.
           - name: floors (numpy 1.26, pandas 2.1)
             python: "3.11"
-            deps: numpy==1.26.4 pandas==2.1.1 scipy==1.11.4 pyyaml h5py anndata matplotlib==3.8.4 seaborn
+            deps: numpy==1.26.4 pandas==2.1.1 scipy==1.11.4 pyyaml h5py anndata==0.10.* matplotlib==3.8.4 seaborn
 
           # Mirrors env-scvi minus torch/scvi-tools, which are multi-GB and gate only the
           # model-access tests; those skip cleanly when torch is absent.
@@ -71,3 +73,50 @@ jobs:
 
       - name: Run tests
         run: pytest -rs -p no:cacheprovider --color=yes
+
+  # Separate from the matrix above because this needs per-job `env` and a cache step, and
+  # because it is the one job allowed to touch the network. It runs on both stacks that
+  # have anndata: the encoding this exercises is written by anndata on top of pandas, and
+  # pandas 2.1 and 3 are exactly where this repository has found encoding bugs before.
+  smoke:
+    name: smoke (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: floors
+            python: "3.11"
+            deps: numpy==1.26.4 pandas==2.1.1 scipy==1.11.4 pyyaml h5py anndata==0.10.* matplotlib==3.8.4 seaborn
+          - name: current
+            python: "3.12"
+            deps: numpy pandas scipy pyyaml h5py anndata matplotlib seaborn
+    env:
+      SCADS_DRVI_CACHE: ${{ github.workspace }}/.smoke-cache
+      SCADS_DRVI_SMOKE_DOWNLOAD: "1"
+      # Without this a runner that has quietly lost network reports a row of green skips.
+      # Fetch failures should be red, and occasionally that will be an upstream outage.
+      SCADS_DRVI_SMOKE_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+
+      # Keyed on the module that holds the URLs, checksums and builder, so the key changes
+      # exactly when the cached bytes would. No restore-keys: a fuzzy hit would restore a
+      # derived h5ad built by a different layout.
+      - uses: actions/cache@v4
+        with:
+          path: .smoke-cache
+          key: smoke-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('tests/smoke_data.py') }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ${{ matrix.deps }} pytest
+          python -m pip install --no-deps -e .
+
+      - name: Run the smoke dataset
+        run: pytest -rs -p no:cacheprovider --color=yes -m smoke

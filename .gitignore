@@ -18,6 +18,14 @@ htmlcov/
 # The pinned LDSC binary, when the default cache lands in-tree
 .ldsc-cache/
 
+# The fetched smoke dataset, when the cache lands in-tree (as it does in CI)
+.smoke-cache/
+
+# Local environments. uv writes a self-ignoring .gitignore inside each of these, so this
+# is belt and braces for anything that creates one another way.
+.venv/
+.venv-*/
+
 # Editors, OS
 .vscode/
 .idea/

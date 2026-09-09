@@ -6,6 +6,21 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- A **smoke dataset**: 10x Genomics' public PBMC scATAC demonstration run (482 cells ×
+  47,843 peaks), fetched on demand, pinned by URL, size and SHA-256, and cached beside the
+  LDSC binary. It is the only test that reads an h5ad **anndata actually wrote** — every
+  other fixture hand-builds the encoding with `h5py`, so the backed-CSR reader in `io.h5ad`
+  was being checked against a hand-built file rather than against the writer it has to
+  survive. `read_rows_csr`, `h5ad_shape`, `h5ad_var_names` and `keep_rows` previously had
+  no caller and no test in this repository at all.
+  Off by default: a plain `pytest` touches no network. `SCADS_DRVI_SMOKE_DOWNLOAD=1
+  pytest -m smoke` runs it; `SCADS_DRVI_SMOKE_REQUIRED=1` makes an unavailable dataset red
+  rather than a skip. The counts, barcodes, peak coordinates and QC metrics are real; the
+  groupings are deterministic rank splits of real QC signal (strata, not cell types); the
+  fit and S-LDSC trees are fabricated with seed 0 and say so in their names and metadata.
+- `_util.paths.cache_dir` — the `$SCADS_DRVI_CACHE` → `$XDG_CACHE_HOME` → `~/.cache`
+  resolution, lifted out of `enrich.binary.ldsc_cache_dir` so the two things this package
+  fetches share one chain instead of a copy that drifts.
 - `enrich.annotations` — widens a thin annotation into the full `CHR BP SNP CM + K`
   form `--overlap-annot` requires, and works around the reader's integer type inference.
   This is what unblocks the Rust S-LDSC swap: with it, `--overlap-annot` runs and writes a
@@ -14,7 +29,11 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   coverage: pyflakes, bugbear, isort and pyupgrade.
 - Continuous integration on three dependency stacks mirroring the three environments the
   package is deployed into — no optional dependencies at all, the declared floors
-  (numpy 1.26 / pandas 2.1), and a current stack with h5py and plotting.
+  (numpy 1.26 / pandas 2.1), and a current stack with h5py and plotting. A fourth job runs
+  the smoke dataset on both stacks that carry anndata, since the encoding it exercises is
+  written by anndata on top of pandas and the two stacks differ there.
+- The README documents how to build a test environment. It had assumed a suitable one
+  already existed, which was true only inside the capsule this package came from.
 
 ### Fixed
 - `io.h5ad.read_obs` indexed the category table with anndata's raw codes, so a **missing**
@@ -52,6 +71,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   serve are resolved by the module-level `TYPE_CHECKING` import.
 
 ### Changed
+- CI's `floors` job pins `anndata==0.10.*`. Left unpinned it resolved to the same version
+  as `current`, so the one job whose purpose is to test the declared floor was not testing
+  that floor — the pin is what makes the two stacks actually differ.
 - `tests/test_import_surface.py` checks 14 modules where it checked 2. Its docstring and
   the README both claimed the whole loaders / statistics / scoring surface imports with no
   torch, matplotlib, seaborn or h5py, but only the top level and `config` were tested — a

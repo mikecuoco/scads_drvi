@@ -59,6 +59,10 @@ addopts = "-q --strict-markers"
 markers = [
     "gpu: needs a CUDA device",
     "data: needs real data on disk",
+    # Distinct from `data`: that one means a file the runner already has, this one means a
+    # pinned public file it may fetch. Off unless SCADS_DRVI_SMOKE_DOWNLOAD=1, so a plain
+    # `pytest` never touches the network.
+    "smoke: builds the checksum-pinned public dataset (network on first run)",
 ]
 
 # Linting. The rule set is chosen for signal, not coverage: pyflakes (F) catches dead

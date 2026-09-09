@@ -38,6 +38,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from scads_drvi._util.paths import cache_dir
+
 __all__ = [
     "LDSC_VERSION",
     "LDSC_ASSETS",
@@ -112,13 +114,7 @@ def ldsc_cache_dir(version: str = LDSC_VERSION) -> Path:
     ``$SCADS_DRVI_CACHE`` wins, then ``$XDG_CACHE_HOME``, then ``~/.cache`` -- so a
     cluster with a small home directory can point it at scratch.
     """
-    root = os.environ.get("SCADS_DRVI_CACHE")
-    if root:
-        base = Path(root)
-    else:
-        xdg = os.environ.get("XDG_CACHE_HOME")
-        base = Path(xdg) if xdg else Path.home() / ".cache"
-    return base / "scads_drvi" / "ldsc" / version
+    return cache_dir("ldsc", version)
 
 
 def asset_for_platform(

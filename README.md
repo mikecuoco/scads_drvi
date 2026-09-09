@@ -136,15 +136,55 @@ subprocess with those modules blocked.
 
 ## Tests
 
+The package declares `torch` and `scvi-tools`, which are multi-GB and are needed by
+`factorize/` only, so a test environment installs the rest and then the package itself
+with `--no-deps`:
+
 ```bash
+uv venv --python 3.12
+uv pip install numpy pandas scipy pyyaml h5py anndata matplotlib seaborn pytest ruff
+uv pip install --no-deps -e .
 pytest
 ```
+
+That dependency set is the `current` CI job, so a local green means what CI means. The
+model-access tests skip cleanly without torch.
 
 CI runs it on three dependency stacks (`.github/workflows/tests.yml`), mirroring the three
 environments the package is deployed into: numpy 2 / pandas 3 with no optional
 dependencies at all, the declared floors (numpy 1.26 / pandas 2.1), and a current stack
 with h5py and plotting. That is not belt-and-braces — it is how two real bugs were found,
 each of which passed in one stack and failed in another.
+
+### The smoke dataset
+
+Every other fixture writes its h5ad by hand with `h5py`, so nothing else here reads a file
+that **anndata** actually wrote — and `io.h5ad`'s backed-CSR reader (`read_rows_csr`,
+`h5ad_shape`, `h5ad_var_names`, `keep_rows`) has no other caller in this repository at all.
+`tests/test_smoke_dataset.py` closes that gap against a real dataset: 10x Genomics' public
+PBMC scATAC demonstration run (482 cells × 47,843 peaks), whose peak names are already the
+`chr:start-end` form `io.peaks` writes.
+
+It is **off by default** — a plain `pytest` never touches the network, and reports the skip
+reason under `-rs`. To run it:
+
+```bash
+SCADS_DRVI_SMOKE_DOWNLOAD=1 pytest -m smoke
+```
+
+The two published inputs (22 MB) are pinned by URL, size and SHA-256, and cached under
+`$SCADS_DRVI_CACHE` → `$XDG_CACHE_HOME` → `~/.cache` alongside the derived h5ad — the same
+chain the LDSC binary uses. Set `SCADS_DRVI_SMOKE_REQUIRED=1` (as CI does) to make an
+unavailable dataset a failure rather than a skip, so a runner that has lost network cannot
+report a row of green skips.
+
+**What is real and what is not.** The counts, barcodes, peak coordinates and per-cell QC
+metrics are real and unmodified. The grouping columns are deterministic rank splits of real
+QC signal — they are named `*_stratum` because they are strata, **not** cell types. The fit
+tree and the S-LDSC results are fabricated with seed 0 on top of the real cells, because no
+real DRVI fit or heritability result exists for a public dataset; everything fabricated
+carries `synthetic` in its name and `"synthetic": true` in `fit.meta.json`. No number that
+comes out of the fabricated half means anything biological.
 
 **If you vendor this package next to another test suite, collect the two separately.** In
 the capsule it came from, the sibling `conftest.py` inserts seven directories onto
