@@ -44,6 +44,37 @@ Defaults sit under `root` and each is individually overridable:
 `fit` and `traits` have **no** defaults on purpose — guessing either would silently point
 the pipeline at the wrong inputs.
 
+## Reading a finished run
+
+```python
+from scads_drvi.labels import load_labels
+from scads_drvi.enrich.ldsc import read_results
+from scads_drvi.scores.cell import cs_from_z
+
+labels  = load_labels(arm / "factor_map.tsv", model="my_arm")   # 124 kept of 186
+results = read_results(arm / "results", traits=["t1", "t2"], labels=labels)
+scores  = cs_from_z(loadings, results.query("trait == 't1'"), model="my_arm", trait="t1")
+
+scores.null       # 0.0 -- read this, never hardcode it beside an axis
+scores.label      # "$CS_i$ (z-weighted loading sum)"
+```
+
+Three things this buys over the code it replaces:
+
+- `read_results` **raises** on a missing `.results` file rather than skipping it. A skip
+  drops the factor from the multiplicity denominator and makes every surviving q-value
+  optimistic without saying so.
+- `labels.assert_index_dims(...)` rejects a display label (`dim_47/neg`) or an
+  annotation name (`k7`) where a loadings column is required. Under a split contract
+  display and index names are both `dim_`-shaped, so the wrong one silently selects a
+  different column.
+- `CellScores` carries its own null. Two different formulas were both called `cs` — a
+  z-weighted loading sum (null 0) and a mean enrichment ratio (null 1) — and nothing on
+  disk recorded which produced a given column.
+
+At production scale (1,263,026 cells × 96 factors) `cs_from_z` takes ~2 s at ~1.4 GB
+peak RSS, computed in row chunks.
+
 ## Import surface
 
 The top level imports nothing heavier than the standard library; public names resolve
