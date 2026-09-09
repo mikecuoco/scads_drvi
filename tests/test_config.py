@@ -65,15 +65,32 @@ def test_fit_must_be_a_bare_name(tmp_path):
 
 
 def test_contract_keys_are_stable(tmp_path):
-    proj = Project(root=tmp_path)
+    proj = Project(root=tmp_path, fit="a_fit")
     contract = proj.contract("arm")
     assert set(contract) == {
-        "loadings", "loadings_npz", "factors", "latent_stats",
-        "factor_map", "half_map", "annot_stats",
+        "loadings", "loadings_npz", "factors", "latent_stats", "fit_meta",
+        "factor_map", "half_map", "annot_stats", "results",
     }
     assert all(isinstance(v, Path) for v in contract.values())
-    assert contract["loadings"].is_relative_to(proj.annotations)
-    assert contract["factor_map"].is_relative_to(proj.enrich)
+
+
+def test_contract_separates_fit_level_from_arm_level(tmp_path):
+    """Loadings are written once per fit; factor selection is per arm. Conflating them
+    is how an arm ends up reading another arm's factor map."""
+    proj = Project(root=tmp_path, fit="a_fit")
+    contract = proj.contract("arm")
+    assert contract["loadings"].is_relative_to(proj.fit_dir())
+    assert contract["latent_stats"].is_relative_to(proj.fit_dir())
+    assert contract["factor_map"].is_relative_to(proj.enrich_dir("arm"))
+    assert contract["results"].is_relative_to(proj.enrich_dir("arm"))
+
+
+def test_contract_fit_can_be_overridden_per_call(tmp_path):
+    proj = Project(root=tmp_path, fit="a_fit")
+    other = proj.contract("arm", fit="b_fit")
+    assert other["loadings"].is_relative_to(proj.fits / "b_fit")
+    # the arm-level half is unaffected by which fit was named
+    assert other["factor_map"] == proj.contract("arm")["factor_map"]
 
 
 def test_figures_dir_creates_on_request(tmp_path):

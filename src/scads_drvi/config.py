@@ -111,22 +111,33 @@ class Project:
 
     # -- the factorization contract -----------------------------------------
 
-    def contract(self, model: str) -> dict[str, Path]:
+    def contract(self, model: str, *, fit: str | None = None) -> dict[str, Path]:
         """The contract files for one arm.
 
-        Keys are stable; the paths are defaults. Missing files are not an error here --
-        callers report that with the context of what they were trying to read.
+        Keys are stable; the paths are defaults, and two levels are deliberately
+        distinguished. ``loadings``/``factors``/``latent_stats`` are written once per
+        *fit*; ``factor_map``/``half_map``/``annot_stats``/``results`` are written per
+        *arm*, because factor selection and annotation sizing are arm decisions.
+
+        A split contract re-derives its own loadings over the split columns, so an arm
+        built that way must be given an explicit ``loadings`` path -- the fit-level
+        default has one column per latent dimension, not one per annotation column.
+
+        Missing files are not an error here: callers report that with the context of
+        what they were trying to read.
         """
-        adir = self.annot_dir(model)
+        fdir = self.fit_dir(fit)
         edir = self.enrich_dir(model)
         return {
-            "loadings": adir / "drvi" / "topic_loadings.tsv",
-            "loadings_npz": adir / "drvi" / "topic_loadings_split.npz",
-            "factors": adir / "drvi" / "topic_factors.tsv",
-            "latent_stats": adir / "inspect" / "latent_stats.tsv",
+            "loadings": fdir / "topic_loadings.tsv",
+            "loadings_npz": fdir / "topic_loadings.npz",
+            "factors": fdir / "topic_factors.tsv",
+            "latent_stats": fdir / "inspect" / "latent_stats.tsv",
+            "fit_meta": fdir / "fit.meta.json",
             "factor_map": edir / "factor_map.tsv",
             "half_map": edir / "half_map.tsv",
             "annot_stats": edir / "annot_stats.tsv",
+            "results": edir / "results",
         }
 
     # -- constructors --------------------------------------------------------
