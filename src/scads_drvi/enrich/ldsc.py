@@ -16,8 +16,9 @@ making every surviving q-value optimistic without saying so.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
@@ -42,12 +43,12 @@ def read_results(
     results_root: str | Path,
     *,
     traits: Iterable[str],
-    labels: "FactorLabels",
+    labels: FactorLabels,
     row: int = 0,
     strict: bool = True,
     fdr: bool = True,
     by: str | None = "trait",
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """Every trait's per-factor results as one tidy frame.
 
     `results_root` holds one directory per trait. Each is expected to contain a

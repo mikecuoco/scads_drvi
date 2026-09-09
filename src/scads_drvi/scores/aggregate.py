@@ -14,8 +14,9 @@ Two conventions worth stating, because they are choices and not defaults:
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Iterable, Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -37,7 +38,7 @@ __all__ = [
 class GroupStats:
     """Per-group summary, plus what it took to produce it."""
 
-    frame: "pd.DataFrame"
+    frame: pd.DataFrame
     keys: tuple[str, ...]
     value: str
     min_cells: int
@@ -47,7 +48,7 @@ class GroupStats:
     def __len__(self) -> int:
         return len(self.frame)
 
-    def order_by(self, column: str = "mean", *, ascending: bool = False) -> "GroupStats":
+    def order_by(self, column: str = "mean", *, ascending: bool = False) -> GroupStats:
         """Same statistics, reordered -- for a figure axis."""
         from dataclasses import replace
 
@@ -61,8 +62,8 @@ class GroupStats:
 
 
 def summarize_by(
-    values: "pd.Series",
-    cells: "pd.DataFrame",
+    values: pd.Series,
+    cells: pd.DataFrame,
     *,
     by: str | Sequence[str],
     min_cells: int = 20,
@@ -75,7 +76,6 @@ def summarize_by(
     present in both are used, and that count is reported as ``n`` so a shrunken join is
     visible rather than inferred.
     """
-    import pandas as pd
     from scipy.stats import norm
 
     keys = [by] if isinstance(by, str) else list(by)
@@ -124,22 +124,21 @@ def summarize_by(
 
 
 def group_matrix(
-    values: "pd.Series",
-    cells: "pd.DataFrame",
+    values: pd.Series,
+    cells: pd.DataFrame,
     *,
     index: str,
     columns: str,
     min_cells: int = 20,
     index_order: Sequence[str] | None = None,
     column_order: Sequence[str] | None = None,
-) -> tuple["pd.DataFrame", "pd.DataFrame"]:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """``(mean matrix, count matrix)`` over two grouping columns.
 
     Cells in a bin with fewer than `min_cells` observations are set to NaN in the mean
     matrix, and the count matrix says why. Returning both is the point: a reader of the
     mean alone cannot tell an empty bin from a low one.
     """
-    import pandas as pd
 
     for column in (index, columns):
         if column not in cells.columns:
@@ -169,7 +168,7 @@ def group_matrix(
 
 
 def block_order(
-    stats: GroupStats | "pd.DataFrame",
+    stats: GroupStats | pd.DataFrame,
     *,
     group: str,
     block: str,
@@ -208,12 +207,12 @@ def block_order(
 
 
 def profile_by_group(
-    matrix: "pd.DataFrame",
+    matrix: pd.DataFrame,
     labels: Iterable,
     *,
     min_cells: int = 1,
     zscore: bool = True,
-) -> tuple["pd.DataFrame", "pd.DataFrame", dict]:
+) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Mean of each column per group, and its z within each column.
 
     Returns ``(means, z, counts)``. The z is taken **within a column**, i.e. across

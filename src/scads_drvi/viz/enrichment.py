@@ -9,7 +9,8 @@ impossible rather than merely inadvisable.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -32,7 +33,7 @@ __all__ = [
 Z_COLUMN = "Coefficient_z-score"
 
 
-def _labelled(results: "pd.DataFrame", labels: "FactorLabels | None") -> list[str]:
+def _labelled(results: pd.DataFrame, labels: FactorLabels | None) -> list[str]:
     if "display" in results.columns:
         return results["display"].astype(str).tolist()
     if labels is not None:
@@ -41,15 +42,15 @@ def _labelled(results: "pd.DataFrame", labels: "FactorLabels | None") -> list[st
 
 
 def heritability_landscape(
-    results: "pd.DataFrame",
+    results: pd.DataFrame,
     *,
     trait: str | None = None,
-    labels: "FactorLabels | None" = None,
+    labels: FactorLabels | None = None,
     top_n: int = 4,
     ramp=None,
     q_column: str = "fdr_q",
     z_column: str = Z_COLUMN,
-) -> tuple["Figure", tuple["Axes", "Axes"]]:
+) -> tuple[Figure, tuple[Axes, Axes]]:
     """Ranked z-scores and a volcano, sharing one significance ramp.
 
     The BH boundary is recomputed from this run's q-values rather than drawn at a
@@ -122,13 +123,13 @@ def heritability_landscape(
 
 
 def trait_concordance(
-    results: "pd.DataFrame",
+    results: pd.DataFrame,
     *,
     traits: Sequence[str],
-    labels: "FactorLabels | None" = None,
+    labels: FactorLabels | None = None,
     z_column: str = Z_COLUMN,
     top_n: int = 4,
-) -> tuple["Figure", tuple["Axes", "Axes"]]:
+) -> tuple[Figure, tuple[Axes, Axes]]:
     """Two traits' z-scores against each other, plus the distribution of the difference.
 
     A sensitivity analysis reads as concordance plus a shift; separating the two panels
@@ -193,14 +194,14 @@ def trait_concordance(
 
 
 def covariate_audit(
-    cells: "pd.DataFrame",
+    cells: pd.DataFrame,
     *,
     value: str,
     covariates: Sequence[str],
     log_x: Sequence[str] = (),
     n_sample: int = 50_000,
     gridsize: int = 40,
-) -> tuple["Figure", np.ndarray]:
+) -> tuple[Figure, np.ndarray]:
     """Hexbin of a per-cell value against each technical covariate, with Spearman rho.
 
     Hexbin rather than scatter because a million-point scatter of a covariate against a
@@ -224,7 +225,7 @@ def covariate_audit(
     )
     flat = axes.ravel()
 
-    for ax, covariate in zip(flat, covariates):
+    for ax, covariate in zip(flat, covariates, strict=True):
         block = plotted[[covariate, value]].replace([np.inf, -np.inf], np.nan).dropna()
         x = block[covariate].to_numpy(dtype=float)
         y = block[value].to_numpy(dtype=float)
@@ -240,14 +241,14 @@ def covariate_audit(
 
 
 def score_by_group(
-    stats: "BoxStats",
+    stats: BoxStats,
     *,
     group_label: str,
     value_label: str = "score",
     null: float | None = None,
     highlight: Sequence[str] = (),
     top_n: int | None = None,
-) -> tuple["Figure", "Axes"]:
+) -> tuple[Figure, Axes]:
     """Score distribution across groups, from PRECOMPUTED quantiles.
 
     Taking a :class:`BoxStats` is the point: this function cannot be handed the per-cell
@@ -281,8 +282,8 @@ def score_by_group(
 
 
 def grouped_landscape(
-    means: "pd.DataFrame",
-    counts: "pd.DataFrame",
+    means: pd.DataFrame,
+    counts: pd.DataFrame,
     *,
     row_label: str,
     column_label: str,
@@ -291,7 +292,7 @@ def grouped_landscape(
     gamma: float = 1.0,
     cmap: str = "magma",
     masked_color: str = "#C2CCD6",
-) -> tuple["Figure", "Axes"]:
+) -> tuple[Figure, Axes]:
     """Heatmap of a value over two groupings, with thin bins visibly masked.
 
     Masked bins are drawn in a distinct cool grey, and the colourbar label says so: grey

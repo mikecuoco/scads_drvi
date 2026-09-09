@@ -15,13 +15,14 @@ implicit would let a reader mistake a quartile whisker for a range.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Literal, Sequence
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
 if TYPE_CHECKING:  # pragma: no cover
-    import pandas as pd
+    pass
 
 __all__ = ["BoxStats", "box_stats", "box_stats_by_column", "draw_boxes"]
 
@@ -62,7 +63,7 @@ class BoxStats:
 
     def order_by(
         self, key: Literal["median", "q3", "label", "n"] = "median", *, ascending=False
-    ) -> "BoxStats":
+    ) -> BoxStats:
         """Same boxes, reordered for an axis."""
         if key == "label":
             order = np.argsort(np.asarray(self.labels))
@@ -82,7 +83,7 @@ class BoxStats:
             maximum=None if self.maximum is None else self.maximum[order],
         )
 
-    def select(self, labels: Sequence[str]) -> "BoxStats":
+    def select(self, labels: Sequence[str]) -> BoxStats:
         """The subset named, in the order named."""
         index = {label: i for i, label in enumerate(self.labels)}
         missing = [label for label in labels if label not in index]
@@ -278,7 +279,7 @@ def draw_boxes(
         **_orientation(vertical),
     )
     if colors is not None:
-        for patch, color in zip(boxes["boxes"], colors):
+        for patch, color in zip(boxes["boxes"], colors, strict=True):
             patch.set_facecolor(color)
             patch.set_edgecolor("black")
 

@@ -138,7 +138,7 @@ def parse_h2_stdout(text: str) -> H2Summary:
             categories.append(" ".join(parts[:-4]))
             values.append(numbers)
 
-    columns = list(zip(*values)) if values else [(), (), (), ()]
+    columns = list(zip(*values, strict=True)) if values else [(), (), (), ()]
     return H2Summary(
         total_h2=_first(_TOTAL_H2, text),
         intercept=_first(_INTERCEPT, text),
@@ -154,7 +154,7 @@ def parse_h2_stdout(text: str) -> H2Summary:
     )
 
 
-def h2_table(summary: H2Summary) -> "pd.DataFrame":
+def h2_table(summary: H2Summary) -> pd.DataFrame:
     """The parsed per-category rows as a frame, focal annotation first."""
     import pandas as pd
 

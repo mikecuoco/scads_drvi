@@ -176,6 +176,61 @@ Facts established against **v0.5.0** on this platform, which the wrapper must re
 - The `.sha256` sidecar records the hash against a `dist/`-prefixed path, so
   `sha256sum -c` fails on it. Parse the hash field instead.
 
+### What still blocks the swap, measured
+
+The wrapper drives the binary correctly and its **point estimates are exact**: over the
+98 categories of one production arm, `max |tau_rust - tau_python| = 0.0`, with no
+`--overlap-annot` and no tolerance. What is missing is the *uncertainty*.
+
+**`--overlap-annot` rejects our annotation files.** This, not the absence of a flag, is
+the blocker:
+
+```
+Error: Annot file '.../ld/k1/annot.1.annot.gz' has 1 columns;
+       expected > 4 (full format: CHR SNP BP CM + annotations)
+```
+
+The per-factor annot is written **thin** -- a single column holding just the indicator.
+That was a deliberate choice, not an oversight: the Python LDSC's `annot_parser` drops
+`SNP/CHR/BP/CM` with `errors='ignore'`, so a bare annotation column is accepted as-is and
+the reference layout is unnecessary. The Rust binary does not share that behaviour and
+requires the full `CHR BP SNP CM + K` form the references use (baselineLD ships 101
+columns).
+
+So the fix belongs in the step that splits one joint annot into per-factor files --
+`split_annot`, which today writes `joint[[name]]` and would need to prepend the four
+identifier columns from that chromosome's `.bim`. Two constraints carry over unchanged
+and are easy to lose in a rewrite: every bim row must be present, **in bim order**,
+because the MAF mask is applied positionally against the `.frq` file; and the rows must
+*not* be restricted to the HapMap3 subset the LD scores are printed over.
+
+**The two "print the uncertainty" flags do not substitute for it.**
+
+- `--print-cov` emits a `99x99` jackknife covariance (98 annotations plus the
+  intercept). It is *not* the quantity LDSC divides into a coefficient SE:
+  `sqrt(diag(cov))/SE_python` should be one constant across categories and instead
+  scatters from `4.2e5` to `7.0e5` -- a 57% spread, so no single `Nbar` reconciles them.
+- `--print-delete-vals` writes `200 blocks x 99 params` **to stdout, not to a file**, at
+  six decimal places. That is lossless for ordinary values and useless for the case at
+  hand: a tau of `-2.4e-17` prints as `-0.000000`.
+
+**The SE convention itself is settled**, checked against the Python tool's own output.
+A block jackknife over the partitioned delete values,
+
+```
+se = sqrt((n - 1) / n * sum((delete_i - mean(delete))^2))
+```
+
+reproduces the logged `Coefficient SE` for all 98 categories to `8e-05` relative -- which
+is the rounding in the log's own 5-significant-figure printout, not a disagreement. The
+partitioned delete values are **already in tau units**: the ratio is exactly 1.0, so
+there is no `Nbar` division, contrary to what the covariance route suggests.
+
+**Memory is unchanged by the port.** `/usr/bin/time -v` records a **8.52 GB** peak,
+against the Python LDSC's 8.53 GB. Note that SLURM's sampled `MaxRSS` reported 671 MB
+for the same run and is simply wrong here -- it missed the peak. Size jobs off the
+former.
+
 ## Storage
 
 The package never copies, stages or reserves disk. When a large read comes off network

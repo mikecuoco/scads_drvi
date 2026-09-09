@@ -11,7 +11,8 @@ something to compute.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -64,12 +65,12 @@ def point_style(n: int) -> dict:
 
 
 def subsample(
-    frame: "pd.DataFrame",
+    frame: pd.DataFrame,
     n: int = SUBSAMPLE_DEFAULT,
     *,
     seed: int = SUBSAMPLE_SEED,
     stratify: str | None = None,
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """A reproducible row subsample. Returns `frame` unchanged when it is small enough.
 
     `stratify` caps the draw per group instead of overall, so a rare category is not
@@ -101,7 +102,7 @@ def subsample(
     return pd.concat(parts)
 
 
-def bare(ax: "Axes") -> None:
+def bare(ax: Axes) -> None:
     """Strip ticks and spines, for a panel whose axes carry no units."""
     ax.set_xticks([])
     ax.set_yticks([])
@@ -109,7 +110,7 @@ def bare(ax: "Axes") -> None:
         spine.set_visible(False)
 
 
-def _coords(frame: "pd.DataFrame", x: str | None, y: str | None) -> tuple[str, str]:
+def _coords(frame: pd.DataFrame, x: str | None, y: str | None) -> tuple[str, str]:
     if x is not None and y is not None:
         for name in (x, y):
             if name not in frame.columns:
@@ -130,17 +131,17 @@ def _coords(frame: "pd.DataFrame", x: str | None, y: str | None) -> tuple[str, s
 
 
 def umap_categorical(
-    frame: "pd.DataFrame",
+    frame: pd.DataFrame,
     hue: str,
     *,
-    ax: "Axes | None" = None,
+    ax: Axes | None = None,
     x: str | None = None,
     y: str | None = None,
     palette: Mapping[str, str] | None = None,
     order: Sequence[str] | None = None,
     legend: str = "right",
     n: int | None = SUBSAMPLE_DEFAULT,
-) -> tuple["Figure", "Axes"]:
+) -> tuple[Figure, Axes]:
     """Scatter an embedding coloured by a categorical column.
 
     The palette is built from the **full** category list before subsampling, so the same
@@ -184,10 +185,10 @@ def umap_categorical(
 
 
 def umap_continuous(
-    frame: "pd.DataFrame",
+    frame: pd.DataFrame,
     value: str,
     *,
-    ax: "Axes | None" = None,
+    ax: Axes | None = None,
     x: str | None = None,
     y: str | None = None,
     cmap: str = "viridis",
@@ -197,7 +198,7 @@ def umap_continuous(
     colorbar: bool = True,
     colorbar_label: str | None = None,
     n: int | None = SUBSAMPLE_DEFAULT,
-) -> tuple["Figure", "Axes"]:
+) -> tuple[Figure, Axes]:
     """Scatter an embedding coloured by a continuous column, under robust limits.
 
     `zero_as_background` draws exact zeros in grey underneath and sets the colour scale
@@ -245,8 +246,8 @@ def umap_continuous(
 
 
 def umap_factor_grid(
-    coords: "pd.DataFrame",
-    loadings: "pd.DataFrame",
+    coords: pd.DataFrame,
+    loadings: pd.DataFrame,
     factors: Sequence[str],
     *,
     ncols: int = 3,
@@ -256,7 +257,7 @@ def umap_factor_grid(
     zero_as_background: bool = True,
     n: int | None = SUBSAMPLE_DEFAULT,
     labels=None,
-) -> "Figure":
+) -> Figure:
     """A grid of per-factor panels over one embedding, each on its own colour scale.
 
     `labels` is an optional :class:`~scads_drvi.labels.FactorLabels`; when given, the

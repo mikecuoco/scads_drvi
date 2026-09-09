@@ -13,8 +13,9 @@ points coloured by a threshold somebody else changed.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -100,7 +101,7 @@ def robust_norm(
     symmetric: bool = False,
     nonzero_only: bool = False,
     floor: float | None = None,
-) -> "Normalize":
+) -> Normalize:
     """A matplotlib norm from :func:`robust_limits`; ``gamma != 1`` gives a PowerNorm."""
     from matplotlib.colors import Normalize, PowerNorm
 
@@ -178,7 +179,7 @@ def significance_handles(ramp: SignificanceRamp = DEFAULT_RAMP) -> list:
 
     return [
         Line2D([], [], marker="o", linestyle="none", color=color, label=label)
-        for color, label in zip(ramp.colors, ramp.legend_labels)
+        for color, label in zip(ramp.colors, ramp.legend_labels, strict=True)
     ]
 
 
@@ -216,11 +217,11 @@ def categorical_palette(
     else:
         cmap = colormaps[base or "turbo"]
         colours = [
-            "#%02x%02x%02x" % tuple(int(255 * v) for v in cmap(x)[:3])
+            "#{:02x}{:02x}{:02x}".format(*(int(255 * v) for v in cmap(x)[:3]))
             for x in np.linspace(0.02, 0.98, n)
         ]
 
-    palette = dict(zip(unique, colours))
+    palette = dict(zip(unique, colours, strict=True))
 
     if highlight is not None:
         wanted = [highlight] if isinstance(highlight, str) else list(highlight)

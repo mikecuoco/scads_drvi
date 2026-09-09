@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from scads_drvi._util import advise, progress
+from scads_drvi._util import advise
 
 
 class TestProgress:

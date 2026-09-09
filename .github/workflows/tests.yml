@@ -11,6 +11,19 @@ on:
 # (pandas 3 StringDtype vs np.issubdtype, and numpy 2 histogram binning), each of which
 # passed in one stack and failed in another.
 jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # Pinned: an unpinned linter turns an upstream release into a red build on a
+      # commit that changed nothing.
+      - run: pip install ruff==0.16.6
+      - run: ruff check --output-format=github .
+
   test:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest

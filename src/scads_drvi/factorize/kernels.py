@@ -12,7 +12,6 @@ code/tests/test_drvi_features.py.
 from scads_drvi._util.progress import log_out as log  # noqa: E402
 
 
-
 def parse_peak_names(names):
     """['chr1:100-601', ...] -> (chrom array, start array, end array)."""
     import numpy as np

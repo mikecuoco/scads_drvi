@@ -20,8 +20,9 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -58,7 +59,7 @@ def _expand_paths(paths: dict[str, str]) -> dict[str, str]:
         if not pending:
             return out
         for key in pending:
-            def repl(m: re.Match) -> str:
+            def repl(m: re.Match, key: str = key) -> str:
                 ref = m.group(1)
                 if ref not in out:
                     raise ValueError(f"paths.{key} references unknown key ${{{ref}}}")
@@ -379,7 +380,7 @@ def read_factors(path: str | Path) -> pd.DataFrame:
     df = pd.read_csv(path, sep="\t", index_col=0)
     raw = df.index.astype(str)
     norm = [normalize_peak_name(v) for v in raw]
-    bad = [r for r, n in zip(raw, norm) if n is None]
+    bad = [r for r, n in zip(raw, norm, strict=True) if n is None]
     if bad:
         log(f"WARNING: dropping {len(bad):,} unparseable feature name(s), e.g. {bad[:3]}")
     keep = [n is not None for n in norm]

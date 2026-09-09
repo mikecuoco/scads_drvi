@@ -7,9 +7,10 @@ notebook wrapping it locally and the rest not.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
     from matplotlib.figure import Figure
@@ -34,7 +35,7 @@ class SaveSpec:
 
 
 def save_figure(
-    fig: "Figure",
+    fig: Figure,
     name: str,
     outdir: str | Path,
     *,

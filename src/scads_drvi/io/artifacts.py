@@ -11,9 +11,10 @@ environment that has none.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -58,7 +59,7 @@ def read_obs(
     columns: Sequence[str] | None = None,
     *,
     index: str | None = None,
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """Read obs columns out of an h5ad, decoding anndata's categorical encoding.
 
     `columns` defaults to every column present. `index` defaults to whatever the file
@@ -115,7 +116,7 @@ def cell_metadata(
     columns: Sequence[str] | None = None,
     index: str | None = None,
     derived: Mapping[str, tuple[str, str]] | None = None,
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """Per-cell metadata, with optional caller-named ratio columns.
 
     `derived` maps a new column name to a ``(numerator, denominator)`` pair of existing
@@ -126,7 +127,6 @@ def cell_metadata(
     Which columns exist, and what a ratio of two of them means, is the caller's
     knowledge. Nothing is assumed here.
     """
-    import pandas as pd
 
     needed = list(columns) if columns is not None else None
     if needed is not None and derived:
@@ -162,7 +162,7 @@ def read_loadings(
     dims: Iterable[str] | None = None,
     chunk_rows: int = 200_000,
     dtype=np.float32,
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """Read a cells x factors loadings matrix.
 
     Prefers a ``.npz`` (arrays ``cells``, ``factors``, ``loadings``) over the TSV when
@@ -236,7 +236,7 @@ def read_loadings(
 
 def read_umap(
     path: str | Path, *, columns: Sequence[str] | None = None
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """Read 2-D embedding coordinates, indexed by cell.
 
     `columns` renames whatever the file calls its axes; by default the first two
@@ -267,10 +267,10 @@ class Interpretation:
     """
 
     model: str
-    labels: "FactorLabels"
-    results: "pd.DataFrame"
-    cells: "pd.DataFrame"
-    loadings: "pd.DataFrame | None" = field(default=None, repr=False)
+    labels: FactorLabels
+    results: pd.DataFrame
+    cells: pd.DataFrame
+    loadings: pd.DataFrame | None = field(default=None, repr=False)
     meta: dict = field(default_factory=dict)
 
     @property
@@ -281,7 +281,7 @@ class Interpretation:
     def n_cells(self) -> int:
         return len(self.cells)
 
-    def for_trait(self, trait: str) -> "pd.DataFrame":
+    def for_trait(self, trait: str) -> pd.DataFrame:
         """The results rows for one trait, which is what scoring and plotting take."""
         block = self.results.loc[self.results["trait"] == trait]
         if block.empty:
@@ -292,7 +292,7 @@ class Interpretation:
 
 
 def load_interpretation(
-    project: "Project",
+    project: Project,
     model: str,
     *,
     traits: Sequence[str] | None = None,

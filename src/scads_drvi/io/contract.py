@@ -11,7 +11,9 @@ import json
 from pathlib import Path
 
 from scads_drvi._util.progress import log as _log_stderr
-from scads_drvi.io.peaks import PEAK_RE  # noqa: F401  (re-exported: callers import it here)
+from scads_drvi.io.peaks import (
+    PEAK_RE,  # noqa: F401  (re-exported: callers import it here)
+)
 
 # PEAK_RE is io.peaks' definition, not a second copy. The copy that used to live here was
 # `^chr[\w]+:\d+-\d+$`, which rejects a sequence name containing a dot -- so a contract over

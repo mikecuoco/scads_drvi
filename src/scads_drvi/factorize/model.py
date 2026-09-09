@@ -21,9 +21,10 @@ requested. Zipping them against the original index list misaligns every row.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -71,7 +72,7 @@ class FitMeta:
         return bool(self.min_fragment)
 
 
-def fit_meta(project: "Project", fit: str | None = None) -> FitMeta:
+def fit_meta(project: Project, fit: str | None = None) -> FitMeta:
     """Read ``fit.meta.json`` for a fit."""
     path = project.fit_dir(fit) / "fit.meta.json"
     if not path.exists():
@@ -86,7 +87,7 @@ def fit_meta(project: "Project", fit: str | None = None) -> FitMeta:
     return FitMeta(raw=raw, **{k: v for k, v in raw.items() if k in known})
 
 
-def _model_dir(project: "Project", fit: str | None = None) -> Path:
+def _model_dir(project: Project, fit: str | None = None) -> Path:
     return project.fit_dir(fit) / "model"
 
 
@@ -158,7 +159,7 @@ def load_kwargs(rank: Any | None = None) -> dict:
 
 
 def load_fit(
-    project: "Project",
+    project: Project,
     fit: str | None = None,
     *,
     adata,

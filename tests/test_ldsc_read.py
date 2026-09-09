@@ -34,7 +34,7 @@ def arm(tmp_path):
     root = tmp_path / "results"
     for trait, zs in {"t1": (4.0, 1.0), "t2": (0.5, 3.0)}.items():
         (root / trait).mkdir(parents=True)
-        for annot, z in zip(("k1", "k2"), zs):
+        for annot, z in zip(("k1", "k2"), zs, strict=True):
             write_results(root / trait / f"{annot}.results", z)
     return labels, root
 
@@ -101,7 +101,10 @@ class TestReadResults:
         assert {"p_1tailed", "fdr_q"} <= set(frame.columns)
         # z=4.0 in t1 and z=3.0 in t2 are each the best in their own trait
         best = frame.loc[frame.groupby("trait")["fdr_q"].idxmin()]
-        assert set(zip(best["trait"], best["dim"])) == {("t1", "dim_0"), ("t2", "dim_1")}
+        assert set(zip(best["trait"], best["dim"], strict=True)) == {
+            ("t1", "dim_0"),
+            ("t2", "dim_1"),
+        }
 
     def test_fdr_can_be_skipped(self, arm):
         labels, root = arm

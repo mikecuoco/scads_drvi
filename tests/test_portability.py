@@ -73,7 +73,7 @@ def analysis(tmp_path_factory):
     rng = np.random.default_rng(0)
 
     fine = [t for lineage in LINEAGES for t in FINE_TYPES[lineage]]
-    lineage_of = {t: l for l in LINEAGES for t in FINE_TYPES[l]}
+    lineage_of = {t: lin for lin in LINEAGES for t in FINE_TYPES[lin]}
 
     cell_ids = np.array(
         [f"plate{i % 5}:bc{i:05d}".encode() for i in range(N_CELLS)]
@@ -110,7 +110,7 @@ def analysis(tmp_path_factory):
         )
         group = obs.create_group("lineage")
         group.create_dataset(
-            "categories", data=np.array([l.encode() for l in LINEAGES])
+            "categories", data=np.array([lin.encode() for lin in LINEAGES])
         )
         group.create_dataset("codes", data=lineage_codes)
 

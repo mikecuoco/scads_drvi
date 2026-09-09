@@ -60,3 +60,20 @@ markers = [
     "gpu: needs a CUDA device",
     "data: needs real data on disk",
 ]
+
+# Linting. The rule set is chosen for signal, not coverage: pyflakes (F) catches dead
+# imports and undefined names, bugbear (B) catches the closure-over-loop-variable and
+# zip-length classes, and I/UP keep imports and typing idioms current. Adopting it found
+# one real closure bug and one zip that silently truncated a padded subplot grid.
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Re-exports: __init__ is the public surface, so a name imported and not used locally
+# is the point.
+"src/scads_drvi/__init__.py" = ["F401"]
+"src/scads_drvi/*/__init__.py" = ["F401"]

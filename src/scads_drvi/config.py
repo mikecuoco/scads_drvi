@@ -143,13 +143,13 @@ class Project:
     # -- constructors --------------------------------------------------------
 
     @classmethod
-    def from_env(cls, **overrides) -> "Project":
+    def from_env(cls, **overrides) -> Project:
         """Build from ``$SCADS_DRVI_ROOT``, falling back to the working directory."""
         root = os.environ.get(ROOT_ENV_VAR) or Path.cwd()
         return cls(root=root, **overrides)
 
     @classmethod
-    def from_yaml(cls, path: str | Path, **overrides) -> "Project":
+    def from_yaml(cls, path: str | Path, **overrides) -> Project:
         """Build from a YAML mapping whose keys are this class's field names.
 
         Unknown keys are ignored rather than rejected: the file this reads is often a
@@ -173,7 +173,7 @@ class Project:
 
     # -- misc ----------------------------------------------------------------
 
-    def replace(self, **changes) -> "Project":
+    def replace(self, **changes) -> Project:
         """A copy with some fields changed."""
         return replace(self, **changes)
 

@@ -26,9 +26,10 @@ subsets a loadings matrix calls it first.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, Literal, Mapping
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
@@ -41,9 +42,8 @@ _ANNOT_RE = re.compile(r"^k(\d+)$")
 _DIM_RE = re.compile(r"^dim_(\d+)$")
 
 
-def _as_bool(series: "pd.Series") -> "pd.Series":
+def _as_bool(series: pd.Series) -> pd.Series:
     """Coerce the string booleans a TSV round-trip produces back to real ones."""
-    import pandas as pd
 
     if series.dtype == bool:
         return series
@@ -58,7 +58,7 @@ def _as_bool(series: "pd.Series") -> "pd.Series":
     )
 
 
-def read_factor_map(path: str | Path) -> "pd.DataFrame":
+def read_factor_map(path: str | Path) -> pd.DataFrame:
     """Read ``factor_map.tsv``: one row per factor, with kept/annot_index.
 
     Columns are ``dim``, ``vanished``, ``kept``, ``drop_reason``, ``annot_index``.
@@ -113,7 +113,7 @@ class FactorLabels:
     display: Mapping[str, str]
     half: Mapping[str, tuple[str, str]] | None = None
     style: DisplayStyle = "dim"
-    frame: "pd.DataFrame | None" = field(default=None, repr=False, compare=False)
+    frame: pd.DataFrame | None = field(default=None, repr=False, compare=False)
 
     @property
     def is_split(self) -> bool:
@@ -212,7 +212,7 @@ def load_labels(
     kept_dims = tuple(kept["dim"].astype(str))
     annot_names = [f"k{int(i)}" for i in kept["annot_index"]]
 
-    annot2dim = dict(zip(annot_names, kept_dims))
+    annot2dim = dict(zip(annot_names, kept_dims, strict=True))
     dim2annot = {d: a for a, d in annot2dim.items()}
     if len(annot2dim) != len(kept_dims):
         raise ValueError(

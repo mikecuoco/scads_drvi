@@ -12,7 +12,6 @@ import scipy.sparse as sp
 from scads_drvi._util.progress import log
 
 
-
 def to_numpy(x) -> np.ndarray:
     """Decode an h5py value to a numpy array of str or numbers."""
     if hasattr(x, "detach"):
@@ -29,7 +28,7 @@ def _iter_index_blocks(path: str, srows: np.ndarray, indptr: np.ndarray,
     edges = np.unique(np.clip(np.r_[0, edges], 0, len(srows)))
     with h5py.File(path, "r") as f:
         X = f["X"]["indices"]
-        for lo_r, hi_r in zip(edges[:-1], edges[1:]):
+        for lo_r, hi_r in zip(edges[:-1], edges[1:], strict=True):
             grp = srows[lo_r:hi_r]
             starts, ends = indptr[grp], indptr[grp + 1]
             breaks = np.nonzero(starts[1:] - ends[:-1] > max_gap)[0] + 1

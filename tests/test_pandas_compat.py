@@ -15,7 +15,6 @@ import ast
 
 import pandas as pd
 import pytest
-
 from conftest import iter_source_files
 
 

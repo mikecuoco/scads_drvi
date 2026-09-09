@@ -6,7 +6,6 @@ import re
 from pathlib import Path
 
 import pytest
-
 from conftest import iter_source_files, iter_string_constants
 
 from scads_drvi.config import ROOT_ENV_VAR, Project

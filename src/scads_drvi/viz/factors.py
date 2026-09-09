@@ -6,7 +6,8 @@ signal, which are dead, which track a nuisance covariate, and how groups load on
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Container, Mapping, Sequence
+from collections.abc import Container, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -27,12 +28,12 @@ __all__ = [
 
 
 def latent_dimension_stats(
-    latent_stats: "pd.DataFrame",
+    latent_stats: pd.DataFrame,
     *,
     columns: Sequence[str] | None = None,
     vanished_column: str = "vanished",
     ncols: int = 2,
-) -> tuple["Figure", np.ndarray]:
+) -> tuple[Figure, np.ndarray]:
     """Per-dimension summary statistics, with vanished dimensions marked.
 
     A vanished dimension is not a small one -- it is a dimension the model stopped using.
@@ -40,7 +41,6 @@ def latent_dimension_stats(
     are drawn in a separate colour and counted in the title.
     """
     import matplotlib.pyplot as plt
-
     from pandas.api.types import is_numeric_dtype
 
     frame = latent_stats
@@ -70,7 +70,9 @@ def latent_dimension_stats(
     flat = axes.ravel()
 
     positions = np.arange(len(frame))
-    for ax, column in zip(flat, columns):
+    # strict=False is deliberate: the grid is padded to nrows*ncols >= len(columns),
+    # so the trailing axes have no column and are left blank.
+    for ax, column in zip(flat, columns, strict=False):
         values = frame[column].to_numpy(dtype=float)
         ax.bar(positions[~vanished], values[~vanished], color="#0173B2", width=0.9)
         if vanished.any():
@@ -90,12 +92,12 @@ def latent_dimension_stats(
 
 
 def factor_distributions(
-    panels: Mapping[str, "BoxStats"],
+    panels: Mapping[str, BoxStats],
     *,
     value_label: str = "score",
     yscale: str | None = "symlog",
     linthresh: float = 1e-3,
-) -> "Figure":
+) -> Figure:
     """One stacked box panel per score source, over the same factor axis.
 
     Takes precomputed statistics, so the per-cell matrices behind these panels are never
@@ -114,7 +116,7 @@ def factor_distributions(
     )
     flat = axes.ravel()
 
-    for ax, name in zip(flat, names):
+    for ax, name in zip(flat, names, strict=True):
         stats = panels[name]
         draw_boxes(ax, stats, show_maximum=stats.maximum is not None)
         ax.set_ylabel(f"{name}\n{value_label}", fontsize=7)
@@ -132,12 +134,12 @@ def factor_distributions(
 
 
 def factor_correlation(
-    correlation: "pd.DataFrame",
+    correlation: pd.DataFrame,
     *,
     vanished: Sequence[str] = (),
     method: str = "average",
     cmap: str = "RdBu_r",
-) -> tuple["Figure", "Axes"]:
+) -> tuple[Figure, Axes]:
     """Clustered factor-factor correlation, with dead factors greyed rather than hidden.
 
     Removing vanished factors would make the matrix look cleaner and quietly change what
@@ -184,12 +186,12 @@ def factor_correlation(
 
 
 def group_factor_heatmaps(
-    panels: Sequence[tuple[str, "pd.DataFrame", str]],
+    panels: Sequence[tuple[str, pd.DataFrame, str]],
     *,
     row_order: Sequence[str] | None = None,
     column_order: Sequence[str] | None = None,
     grey_columns: Container[str] = (),
-) -> tuple["Figure", np.ndarray]:
+) -> tuple[Figure, np.ndarray]:
     """Several heatmaps sharing ONE row and column order.
 
     Letting each panel choose its own ordering is how a reader compares two panels and
@@ -218,7 +220,7 @@ def group_factor_heatmaps(
     )
     flat = axes.ravel()
 
-    for ax, (title, frame, cmap) in zip(flat, panels):
+    for ax, (title, frame, cmap) in zip(flat, panels, strict=True):
         aligned = frame.reindex(index=rows, columns=cols)
         raw = aligned.to_numpy(dtype=float)
         values = np.ma.masked_invalid(raw)
@@ -246,11 +248,11 @@ def group_factor_heatmaps(
 
 
 def covariate_association(
-    association: "pd.Series",
+    association: pd.Series,
     *,
     threshold: float = 0.7,
     ylabel: str = "|Spearman rho|",
-) -> tuple["Figure", "Axes"]:
+) -> tuple[Figure, Axes]:
     """Per-factor association with a nuisance covariate, with a concern threshold drawn.
 
     The threshold is an argument because what counts as too much depends on the covariate

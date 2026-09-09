@@ -34,9 +34,9 @@ import shutil
 import subprocess
 import tarfile
 import zipfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
 
 __all__ = [
     "LDSC_VERSION",

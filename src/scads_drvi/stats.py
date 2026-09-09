@@ -20,7 +20,8 @@ genome-wide bin count rather than the number of tests performed.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterable, Literal
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -117,7 +118,7 @@ def legacy_bh_qvalues(p) -> np.ndarray:
     return np.clip(p * m / ranks, 0.0, 1.0)
 
 
-def compare_bh(p, n: int | None = None) -> "pd.DataFrame":
+def compare_bh(p, n: int | None = None) -> pd.DataFrame:
     """Correct vs legacy q-values side by side, with the significance flips called out.
 
     Columns: ``p``, ``q_correct``, ``q_legacy``, ``delta``, and ``flips_at_05``. The last
@@ -158,7 +159,7 @@ def bh_threshold_z(q, z, *, alpha: float = 0.05) -> float | None:
 
 
 def add_fdr(
-    frame: "pd.DataFrame",
+    frame: pd.DataFrame,
     *,
     by: str | Iterable[str] | None = None,
     z_col: str = "Coefficient_z-score",
@@ -166,7 +167,7 @@ def add_fdr(
     q_col: str = "fdr_q",
     n: int | None = None,
     tail: Tail = "upper",
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """Return a copy of `frame` with one-tailed p and BH q columns added.
 
     `by` names the columns that delimit a correction family -- typically whatever
@@ -204,8 +205,8 @@ def add_fdr(
 
 
 def significant(
-    frame: "pd.DataFrame", *, alpha: float = 0.05, q_col: str = "fdr_q"
-) -> "pd.Series":
+    frame: pd.DataFrame, *, alpha: float = 0.05, q_col: str = "fdr_q"
+) -> pd.Series:
     """Boolean mask at a stated alpha, so no caller re-types ``q < 0.05``."""
     if q_col not in frame.columns:
         raise KeyError(f"{q_col!r} not in frame; run add_fdr first")

@@ -20,10 +20,11 @@ rather than from a constant typed next to the axis.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, Mapping
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -66,7 +67,7 @@ _LABEL: Mapping[ScoreKind, str] = {
 class CellScores:
     """Per-cell scores plus the provenance needed to plot and interpret them."""
 
-    values: "pd.Series"
+    values: pd.Series
     kind: ScoreKind
     model: str
     trait: str
@@ -87,7 +88,7 @@ class CellScores:
     def __len__(self) -> int:
         return len(self.values)
 
-    def describe(self) -> "pd.Series":
+    def describe(self) -> pd.Series:
         """Summary statistics, with the null included for reference."""
         import pandas as pd
 
@@ -97,7 +98,7 @@ class CellScores:
 
 
 def factor_weights(
-    results: "pd.DataFrame",
+    results: pd.DataFrame,
     *,
     dims: Iterable[str],
     column: str = "Coefficient_z-score",
@@ -135,12 +136,12 @@ def factor_weights(
 
 
 def cs_from_z(
-    loadings: "pd.DataFrame",
-    results: "pd.DataFrame",
+    loadings: pd.DataFrame,
+    results: pd.DataFrame,
     *,
     model: str,
     trait: str,
-    labels: "FactorLabels | None" = None,
+    labels: FactorLabels | None = None,
     column: str = "Coefficient_z-score",
     clip_negative: bool = True,
     chunk_rows: int = 200_000,
@@ -229,7 +230,7 @@ def read_cell_scores(
     )
 
 
-def compare_scores(left: CellScores, right: CellScores) -> "pd.DataFrame":
+def compare_scores(left: CellScores, right: CellScores) -> pd.DataFrame:
     """Correlate two scores over the cells they share.
 
     Both Pearson and Spearman: the two formulas are on different scales with different

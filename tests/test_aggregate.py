@@ -161,7 +161,9 @@ class TestBlockOrder:
         names, spans = block_order(stats, group="grouping", block="block")
         assert spans[0][1] == 0
         assert spans[-1][2] == len(names)
-        for (_, _, stop), (_, start, _) in zip(spans, spans[1:]):
+        # strict=False: this is a pairwise window, so spans[1:] is one shorter
+        # than spans and the final element has no successor to compare against.
+        for (_, _, stop), (_, start, _) in zip(spans, spans[1:], strict=False):
             assert stop == start
 
     def test_descending_by_default(self, values, cells):

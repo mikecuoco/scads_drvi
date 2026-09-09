@@ -233,7 +233,7 @@ def all_gather_rows(a: np.ndarray, r: Ranks) -> np.ndarray:
     buf[: a.shape[0]] = torch.as_tensor(a, device=r.device)
     parts = [torch.zeros_like(buf) for _ in range(r.world_size)]
     dist.all_gather(parts, buf)
-    out = np.concatenate([p[:c].cpu().numpy() for p, c in zip(parts, counts)], axis=0)
+    out = np.concatenate([p[:c].cpu().numpy() for p, c in zip(parts, counts, strict=True)], axis=0)
     del buf, parts
     log(f"rank {r.rank}: gathered {out.shape} from blocks {counts}")
     return out
