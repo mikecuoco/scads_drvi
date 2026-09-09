@@ -95,7 +95,7 @@ def scatter_max_overlap(chrom_idx, cons_start, cons_end, q_chrom, q_start, q_end
 
 
 def select(mask, n_sub, signal, n_features, max_shared, min_anchor, anchor_frac,
-           subclasses, logfn=log):
+           groups, logfn=log):
     """mask: (n_peaks, n_sub) bool. signal: (n_peaks, n_sub) float, 0 where not called.
 
     Returns (selected row indices, source label per selected row).
@@ -106,14 +106,14 @@ def select(mask, n_sub, signal, n_features, max_shared, min_anchor, anchor_frac,
 
     specific = n_sub <= max_shared
     anchor_pool = n_sub >= min_anchor
-    logfn(f"  specific pool (n_subclasses <= {max_shared}): {specific.sum():,}")
-    logfn(f"  anchor pool  (n_subclasses >= {min_anchor}): {anchor_pool.sum():,}")
+    logfn(f"  specific pool (n_groups <= {max_shared}): {specific.sum():,}")
+    logfn(f"  anchor pool  (n_groups >= {min_anchor}): {anchor_pool.sum():,}")
 
-    # -- per-subclass balanced draw from the specific pool ---------------------
+    # -- per-group balanced draw from the specific pool ---------------------
     # Grow M until the union reaches the target; unions overlap because a peak
-    # called in 2-3 subclasses can be picked by more than one.
+    # called in 2-3 groups can be picked by more than one.
     per_sub_rank = []
-    for j in range(len(subclasses)):
+    for j in range(len(groups)):
         cand = np.flatnonzero(mask[:, j] & specific)
         cand = cand[np.argsort(-signal[cand, j], kind="stable")]
         per_sub_rank.append(cand)
@@ -132,7 +132,7 @@ def select(mask, n_sub, signal, n_features, max_shared, min_anchor, anchor_frac,
     m = lo
     for cand in per_sub_rank:
         chosen.update(cand[:m].tolist())
-    logfn(f"  top-{m} per subclass -> {len(chosen):,} specific peaks")
+    logfn(f"  top-{m} per group -> {len(chosen):,} specific peaks")
 
     # Trim deterministically to target: drop the weakest by best-signal rank.
     spec_rows = np.array(sorted(chosen), dtype=np.int64)
@@ -197,7 +197,7 @@ def self_check():
                         np.array([3.0, 4.0], dtype=np.float32), out3)
     assert list(out3) == [0.0, 0.0, 0.0], list(out3)
 
-    # -- selection: every subclass represented, anchor honoured ---------------
+    # -- selection: every group represented, anchor honoured ---------------
     rng = np.random.default_rng(0)
     n_peaks, n_s = 400, 4
     mask = rng.random((n_peaks, n_s)) < 0.35
@@ -207,15 +207,15 @@ def self_check():
     signal = np.where(mask, rng.random((n_peaks, n_s)) * 10, 0.0)
     rows, src = select(mask, n_sub, signal, n_features=60, max_shared=2,
                        min_anchor=4, anchor_frac=0.2,
-                       subclasses=[f"s{i}" for i in range(n_s)], logfn=lambda *_: None)
+                       groups=[f"s{i}" for i in range(n_s)], logfn=lambda *_: None)
     assert len(rows) == len(set(rows.tolist())), "duplicate rows selected"
     assert (src == "anchor").sum() > 0, "no anchor peaks drawn"
     spec = rows[src == "specific"]
     assert (n_sub[spec] <= 2).all(), "specific selection violated max_shared"
     anc = rows[src == "anchor"]
     assert (n_sub[anc] >= 4).all(), "anchor selection violated min_anchor"
-    for j in range(n_s):                          # subclass balance
-        assert mask[spec, j].any(), f"subclass {j} unrepresented"
+    for j in range(n_s):                          # group balance
+        assert mask[spec, j].any(), f"group {j} unrepresented"
     assert list(rows) == sorted(rows.tolist()), "output not in BED order"
     print("self-check: all assertions passed")
     return 0
