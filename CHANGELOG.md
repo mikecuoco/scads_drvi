@@ -6,6 +6,10 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- `enrich.annotations` — widens a thin annotation into the full `CHR BP SNP CM + K`
+  form `--overlap-annot` requires, and works around the reader's integer type inference.
+  This is what unblocks the Rust S-LDSC swap: with it, `--overlap-annot` runs and writes a
+  `.results` carrying `Coefficient_std_error` and `Coefficient_z-score`.
 - `ruff` as the linter, pinned in CI, with a rule set chosen for signal rather than
   coverage: pyflakes, bugbear, isort and pyupgrade.
 - Continuous integration on three dependency stacks mirroring the three environments the
@@ -28,11 +32,15 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   annotations, deprecated `typing` imports, import order.
 
 ### Known limitations
-- **The S-LDSC swap to the Rust binary is not finished.** Point estimates are exact
-  (`max |tau_rust - tau_python| = 0.0` over 98 categories), but `--overlap-annot` rejects
-  the thin single-column annotation files the Python tool accepted, and neither
-  `--print-cov` nor `--print-delete-vals` yields a usable coefficient SE. See the LDSC
-  section of the README for the measurements and the concrete next step.
+- **The Rust S-LDSC binary is not yet a drop-in replacement.** It now runs end to end and
+  its coefficients match Python to `4.1e-05` relative, but the jackknife standard errors
+  do not: median 3.3% apart, and **2 of 98 categories cross z > 1.645 in one and not the
+  other** on a single arm and trait. Compare across every arm and trait before adopting
+  it; matching coefficients do not imply matching conclusions.
+- The same run reports `Prop._SNPs` as `1.57e7` where a proportion belongs, and a summed
+  per-annotation `M` of `9.4e13` for ~1.2M variants. The pipeline consumes only the
+  coefficient columns, so this does not block it, but the enrichment columns should not be
+  trusted without separate checking.
 - Peak memory for `h2` is ~8.5 GB and is **not** improved by the port.
 
 ## [0.1.0] - 2026-09-09

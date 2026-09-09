@@ -12,9 +12,15 @@ factor ``k1``, trait ``bellenguez``): the coefficient agrees to every printed di
 
 One thing this format does **not** carry is the coefficient standard error, and
 therefore not the z-score either. The pipeline's significance testing is built on that
-z, so a caller needing it must either run with ``--overlap-annot`` (which requires a
-frequency file and a thin annotation beside every LD-score prefix) or obtain the SE
-another way. :func:`parse_h2_stdout` reports ``None`` rather than inventing one.
+z, so a caller needing it must run with ``--overlap-annot``, which writes a proper
+``.results`` carrying ``Coefficient_std_error`` and ``Coefficient_z-score``.
+:func:`parse_h2_stdout` reports ``None`` rather than inventing one.
+
+That flag needs a frequency file and, beside every LD-score prefix, an annotation in
+**full** format -- ``CHR BP SNP CM`` ahead of the annotation columns. A *thin*
+annotation, which the Python original accepted, is rejected outright. See
+:mod:`scads_drvi.enrich.annotations`, which does the widening and documents the two
+row-alignment invariants that make it safe.
 """
 
 from __future__ import annotations

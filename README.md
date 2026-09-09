@@ -176,60 +176,65 @@ Facts established against **v0.5.0** on this platform, which the wrapper must re
 - The `.sha256` sidecar records the hash against a `dist/`-prefixed path, so
   `sha256sum -c` fails on it. Parse the hash field instead.
 
-### What still blocks the swap, measured
+### The swap, measured end to end
 
-The wrapper drives the binary correctly and its **point estimates are exact**: over the
-98 categories of one production arm, `max |tau_rust - tau_python| = 0.0`, with no
-`--overlap-annot` and no tolerance. What is missing is the *uncertainty*.
+`--overlap-annot` now runs against the Rust binary and writes a `.results` carrying
+`Coefficient`, **`Coefficient_std_error`** and **`Coefficient_z-score`** — the columns the
+whole significance path is built on. Getting there needed two fixes, neither of which was
+the flag itself.
 
-**`--overlap-annot` rejects our annotation files.** This, not the absence of a flag, is
-the blocker:
+**1. The annotation must be full format.** Our per-factor annot is written *thin* — one
+bare column. That was a considered choice: the Python LDSC's `annot_parser` drops
+`SNP/CHR/BP/CM` with `errors='ignore'`, so the reference layout was unnecessary. The Rust
+binary does not share that behaviour and rejects it outright:
 
 ```
 Error: Annot file '.../ld/k1/annot.1.annot.gz' has 1 columns;
        expected > 4 (full format: CHR SNP BP CM + annotations)
 ```
 
-The per-factor annot is written **thin** -- a single column holding just the indicator.
-That was a deliberate choice, not an oversight: the Python LDSC's `annot_parser` drops
-`SNP/CHR/BP/CM` with `errors='ignore'`, so a bare annotation column is accepted as-is and
-the reference layout is unnecessary. The Rust binary does not share that behaviour and
-requires the full `CHR BP SNP CM + K` form the references use (baselineLD ships 101
-columns).
+`enrich.annotations.write_full_annot` does the widening, and encodes the two invariants
+that are silent when lost: every `.bim` row present **in `.bim` order** (the frequency
+mask is applied positionally), and *not* restricted to the HapMap3 subset the LD scores
+are printed over.
 
-So the fix belongs in the step that splits one joint annot into per-factor files --
-`split_annot`, which today writes `joint[[name]]` and would need to prepend the four
-identifier columns from that chromosome's `.bim`. Two constraints carry over unchanged
-and are easy to lose in a rewrite: every bim row must be present, **in bim order**,
-because the MAF mask is applied positionally against the `.frq` file; and the rows must
-*not* be restricted to the HapMap3 subset the LD scores are printed over.
-
-**The two "print the uncertainty" flags do not substitute for it.**
-
-- `--print-cov` emits a `99x99` jackknife covariance (98 annotations plus the
-  intercept). It is *not* the quantity LDSC divides into a coefficient SE:
-  `sqrt(diag(cov))/SE_python` should be one constant across categories and instead
-  scatters from `4.2e5` to `7.0e5` -- a 57% spread, so no single `Nbar` reconciles them.
-- `--print-delete-vals` writes `200 blocks x 99 params` **to stdout, not to a file**, at
-  six decimal places. That is lossless for ordinary values and useless for the case at
-  hand: a tau of `-2.4e-17` prints as `-0.000000`.
-
-**The SE convention itself is settled**, checked against the Python tool's own output.
-A block jackknife over the partitioned delete values,
+**2. The reference annotations trip the reader's type inference.** With a full annot the
+run gets one step further and dies on `baselineLD` itself:
 
 ```
-se = sqrt((n - 1) / n * sum((delete_i - mean(delete))^2))
+Error: reading annot file '.../baselineLD.1.annot.gz'
+       Original error: invalid primitive value found during CSV parsing
 ```
 
-reproduces the logged `Coefficient SE` for all 98 categories to `8e-05` relative -- which
-is the rounding in the log's own 5-significant-figure printout, not a disagreement. The
-partitioned delete values are **already in tau units**: the ratio is exactly 1.0, so
-there is no `Nbar` division, contrary to what the covariance route suggests.
+The cause is exact: `CM` is `0` for the **first 166 rows** of chromosome 1 and
+`0.000279324` at row 167. The reader infers `Int64` from its leading sample and then
+fails on the first decimal. This is an upstream bug and it affects the *standard*
+baselineLD v2.2 release, so it blocks `--overlap-annot` for anyone using the canonical
+references. `enrich.annotations.force_decimal` writes the affected columns with an
+explicit decimal point, applied to a copy — the read-only reference is never touched.
 
-**Memory is unchanged by the port.** `/usr/bin/time -v` records a **8.52 GB** peak,
-against the Python LDSC's 8.53 GB. Note that SLURM's sampled `MaxRSS` reported 671 MB
-for the same run and is simply wrong here -- it missed the peak. Size jobs off the
-former.
+**What the numbers say.** One arm, one trait, 98 categories, against the Python run:
+
+| quantity | agreement |
+|---|---|
+| coefficient (τ) | max relative difference **4.1e-05** — effectively exact |
+| coefficient SE | median **3.3%**, max 43%; 66% within 5%, 99% within 20% |
+| z | correlation **0.9983**, max abs difference 0.23 |
+| nominal calls at z > 1.645 | **2 of 98 categories flip** |
+
+So this is **not yet a drop-in replacement.** The point estimates are the same tool; the
+jackknife standard errors are not, and two categories change significance class on a
+single arm. Before adopting it, run both across every arm and trait and decide whether
+that movement is acceptable — do not assume the aggregate conclusions survive because the
+coefficients match.
+
+**Two further cautions from the same run.** `Prop._SNPs` comes back as `1.57e7` where a
+proportion is expected, and the reported per-annotation `M` sums to `9.4e13`, which is
+nonsense for ~1.2M variants; the enrichment columns derived from them should not be
+trusted without separate checking. The pipeline consumes only the coefficient columns, so
+this does not block it. And peak memory is **8.52 GB**, essentially unchanged from
+Python's 8.53 GB — the port buys speed, not headroom. SLURM's sampled `MaxRSS` reported
+671 MB for the same run and simply missed the peak; size jobs off `/usr/bin/time -v`.
 
 ## Storage
 
