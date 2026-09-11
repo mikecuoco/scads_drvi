@@ -33,6 +33,14 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=7.4"]
+docs = [
+    "sphinx>=7.3",
+    "sphinx-book-theme>=1.1",
+    "sphinx-autodoc-typehints>=2.2",
+    "sphinx-copybutton>=0.5",
+    "myst-nb>=1.1",
+    "jupytext>=1.16",
+]
 [project.urls]
 Homepage = "https://github.com/mikecuoco/scads_drvi"
 Source = "https://github.com/mikecuoco/scads_drvi"
