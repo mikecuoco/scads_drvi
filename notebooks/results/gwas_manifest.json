@@ -1,0 +1,16 @@
+{
+  "columns": {
+    "N_col": "N",
+    "a1": "Tested_Allele",
+    "a2": "Other_Allele",
+    "frq": "Freq_Tested_Allele_in_HRS",
+    "p": "P",
+    "signed_sumstats": "BETA,0",
+    "snp": "SNP"
+  },
+  "layout_version": 1,
+  "n_snps": 1953984,
+  "pubmed_id": "30124842",
+  "source_base": "https://ftp.ebi.ac.uk/pub/databases/gwas/summary_statistics/GCST006001-GCST007000/GCST006901",
+  "trait": "height_yengo2018_gcst006901"
+}

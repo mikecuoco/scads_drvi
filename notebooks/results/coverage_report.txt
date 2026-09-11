@@ -1,0 +1,41 @@
+Name                                                                                               Stmts   Miss  Cover   Missing
+--------------------------------------------------------------------------------------------------------------------------------
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/__init__.py                13      7    46%   28-34, 38
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/_util/__init__.py           0      0   100%
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/_util/advise.py            57     57     0%   12-143
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/_util/paths.py             12      1    92%   28
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/_util/presets.py           73     73     0%   7-141
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/_util/progress.py           7      1    86%   28
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/config.py                  82     29    65%   78, 88, 95, 99, 103, 107-110, 129-131, 154-155, 164-178, 184, 188-189
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/enrich/__init__.py          0      0   100%
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/enrich/annotations.py      44      4    91%   83, 106, 111, 152
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/enrich/binary.py          150     72    52%   108, 124-131, 140-144, 153, 156, 161-173, 200, 208-211, 215-220, 224-228, 234-269, 290, 297, 305, 309, 314, 353
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/enrich/config.py          196    196     0%   20-499
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/enrich/h2_output.py        77     77     0%   26-167
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/enrich/ldsc.py             45     45     0%   17-114
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/factorize/__init__.py       0      0   100%
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/factorize/kernels.py      166    166     0%   13-252
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/factorize/model.py        126     57    55%   76, 83, 89, 106, 110, 125-149, 160-162, 184, 188-200, 204, 224, 229, 256-282, 298-307
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/factorize/multigpu.py     106    106     0%   17-255
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/factorize/train.py        261     87    67%   144, 147, 154, 157, 183-199, 209, 212, 218, 239-243, 320, 322, 324, 328, 338, 363-371, 434-438, 441-448, 460, 485, 487, 489, 491, 493, 495, 513-514, 567, 569, 607, 627-637, 649-650, 661, 664-665, 692, 717, 740-776
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/io/__init__.py              0      0   100%
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/io/artifacts.py           166    166     0%   12-366
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/io/contract.py             37     37     0%   8-76
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/io/h5ad.py                 89     73    18%   19-21, 27-46, 58-106, 115-118, 131-146
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/io/meta.py                 26      7    73%   37-40, 57-59
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/io/peaks.py                21      8    62%   47, 52-54, 63-66
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/labels.py                 113    113     0%   26-246
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/scores/__init__.py          0      0   100%
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/scores/aggregate.py       135     92    32%   49, 53-59, 84, 86, 91, 101, 143-167, 191-219, 239-257, 266-287, 297-320
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/scores/cell.py             93     35    62%   86, 89, 93-97, 116, 118, 123, 127, 160, 164, 170, 208-224, 241-256
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/stats.py                   83     83     0%   21-223
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/viz/__init__.py             0      0   100%
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/viz/color.py               94     94     0%   14-272
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/viz/enrichment.py         154    154     0%   10-349
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/viz/factors.py            130    130     0%   7-279
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/viz/frugal.py             128    128     0%   16-321
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/viz/save.py                48     16    67%   59, 73, 78-80, 90-97, 102-106
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/viz/style.py                9      0   100%
+/home/mike.cuoco/repos/scads_drvi/.claude/worktrees/trainer/src/scads_drvi/viz/umap.py               134    134     0%   12-304
+--------------------------------------------------------------------------------------------------------------------------------
+TOTAL                                                                                               2875   2248    22%

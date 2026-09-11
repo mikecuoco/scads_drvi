@@ -1,0 +1,25 @@
+dim	vanished	kept	drop_reason	annot_index
+dim_0_pos	False	True		1.0
+dim_0_neg	False	True		2.0
+dim_1_pos	False	True		3.0
+dim_1_neg	False	True		4.0
+dim_2_pos	False	True		5.0
+dim_2_neg	False	True		6.0
+dim_3_pos	False	True		7.0
+dim_3_neg	False	True		8.0
+dim_4_pos	False	True		9.0
+dim_4_neg	False	True		10.0
+dim_5_pos	False	True		11.0
+dim_5_neg	False	True		12.0
+dim_6_pos	False	False	fewer than 20 cells non-zero in the ReLU half	
+dim_6_neg	False	True		13.0
+dim_7_pos	False	True		14.0
+dim_7_neg	False	False	fewer than 20 cells non-zero in the ReLU half	
+dim_8_pos	False	True		15.0
+dim_8_neg	False	True		16.0
+dim_9_pos	False	True		17.0
+dim_9_neg	False	True		18.0
+dim_10_pos	False	True		19.0
+dim_10_neg	False	False	fewer than 20 cells non-zero in the ReLU half	
+dim_11_pos	False	True		20.0
+dim_11_neg	False	True		21.0

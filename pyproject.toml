@@ -81,3 +81,8 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
 # is the point.
 "src/scads_drvi/__init__.py" = ["F401"]
 "src/scads_drvi/*/__init__.py" = ["F401"]
+# jupytext percent-format notebook sources. A cell ending in a bare expression is how a
+# notebook renders a value (B018 reads that as dead code), and an import beside the cell
+# that needs it is the convention rather than an accident (E402). Linting the rest of
+# these files is still worth it -- undefined names and dead imports are real there too.
+"notebooks/*.py" = ["B018", "E402"]

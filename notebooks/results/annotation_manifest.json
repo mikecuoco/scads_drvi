@@ -1,0 +1,8 @@
+{
+  "factor": "dim_0",
+  "top_frac": 0.1,
+  "n_peaks_total": 47843,
+  "n_peaks_kept": 4784,
+  "n_lifted": 4783,
+  "n_unmapped": 1
+}
