@@ -11,7 +11,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 
-from scads_drvi.viz.color import (  # noqa: E402
+from scads_drvi.pl.color import (  # noqa: E402
     DEFAULT_RAMP,
     ROBUST_LIMITS,
     Z_NOMINAL_ONE_TAILED,
@@ -24,12 +24,12 @@ from scads_drvi.viz.color import (  # noqa: E402
     significance_colors,
     significance_handles,
 )
-from scads_drvi.viz.frugal import (  # noqa: E402
+from scads_drvi.pl.frugal import (  # noqa: E402
     box_stats,
     box_stats_by_column,
     draw_boxes,
 )
-from scads_drvi.viz.save import SaveSpec, figure_metadata, save_figure  # noqa: E402
+from scads_drvi.pl.save import SaveSpec, figure_metadata, save_figure  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

@@ -24,12 +24,9 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
-
-if TYPE_CHECKING:  # pragma: no cover
-    from scads_drvi.config import Project
 
 __all__ = [
     "COMPILE_PREFIX",
@@ -72,23 +69,30 @@ class FitMeta:
         return bool(self.min_fragment)
 
 
-def fit_meta(project: Project, fit: str | None = None) -> FitMeta:
-    """Read ``fit.meta.json`` for a fit."""
-    path = project.fit_dir(fit) / "fit.meta.json"
-    if not path.exists():
-        raise FileNotFoundError(
-            f"no fit record at {path}. It is written by the training run; without it "
-            f"there is no way to tell what this checkpoint was trained on."
-        )
-    raw = json.loads(path.read_text())
-    if "n_latent" not in raw:
-        raise ValueError(f"{path} does not record n_latent")
+def fit_meta(path: str | Path) -> FitMeta:
+    """Read a fit's run record: either its ``fit.meta.json`` (legacy layout, `path`
+    naming that file or the fit directory containing it) or a result h5ad's
+    ``uns["provenance"]`` (`path` naming the h5ad -- see :mod:`scads_drvi.io.result`).
+    """
+    path = Path(path)
+    if path.suffix == ".h5ad":
+        import anndata as ad
+
+        raw = dict(ad.read_h5ad(path, backed="r").uns.get("provenance", {}))
+        if "n_latent" not in raw:
+            raise ValueError(f"{path}'s provenance does not record n_latent")
+    else:
+        json_path = path / "fit.meta.json" if path.is_dir() else path
+        if not json_path.exists():
+            raise FileNotFoundError(
+                f"no fit record at {json_path}. It is written by the training run; "
+                f"without it there is no way to tell what this checkpoint was trained on."
+            )
+        raw = json.loads(json_path.read_text())
+        if "n_latent" not in raw:
+            raise ValueError(f"{json_path} does not record n_latent")
     known = {f for f in FitMeta.__dataclass_fields__ if f != "raw"}
     return FitMeta(raw=raw, **{k: v for k, v in raw.items() if k in known})
-
-
-def _model_dir(project: Project, fit: str | None = None) -> Path:
-    return project.fit_dir(fit) / "model"
 
 
 def checkpoint_keys(model_dir: str | Path) -> list[str]:
@@ -159,8 +163,7 @@ def load_kwargs(rank: Any | None = None) -> dict:
 
 
 def load_fit(
-    project: Project,
-    fit: str | None = None,
+    model_dir: str | Path,
     *,
     adata,
     rank: Any | None = None,
@@ -170,12 +173,15 @@ def load_fit(
 ):
     """Load a trained DRVI, applying the compile-prefix and device fixes.
 
-    `adata` must already be registered for the model -- see :func:`setup_anndata_like`,
-    which reads the batch key out of the fit record rather than assuming one.
+    `model_dir` is the directory a training run's ``model.save(...)`` wrote (what used
+    to be found via ``Project.fit_dir(fit) / "model"``; the caller now names it
+    directly). `adata` must already be registered for the model -- see
+    :func:`setup_anndata_like`, which reads the batch key out of the fit record rather
+    than assuming one.
     """
     from scvi.external import DRVI
 
-    model_dir = _model_dir(project, fit)
+    model_dir = Path(model_dir)
     if not model_dir.exists():
         raise FileNotFoundError(f"no saved model at {model_dir}")
 

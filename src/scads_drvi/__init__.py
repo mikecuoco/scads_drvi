@@ -3,11 +3,16 @@
 Method-generic: nothing here names a tissue, cell type, donor cohort, trait or obs
 column. Those are caller-supplied. See ``tests/test_generic.py``, which enforces it.
 
-The top level imports nothing heavier than the standard library. ``torch`` and
-``scvi-tools`` are declared dependencies but are imported only by
-:mod:`scads_drvi.factorize.model`, and ``matplotlib``/``seaborn`` only by
-:mod:`scads_drvi.viz` -- so an environment without them can still use the loaders,
-statistics and scoring. Public names below resolve lazily for the same reason.
+There is no path-configuration object here. A fit's results live in one ``AnnData``
+(see :mod:`scads_drvi.io.result`), built and read with explicit paths -- ``build_embed``,
+``write_result``, ``read_result`` -- rather than through a ``Project`` that derives them.
+
+The top level imports nothing heavier than the standard library. ``torch``,
+``scvi-tools`` and ``drvi-py`` are declared dependencies but are imported only by
+:mod:`scads_drvi.factorize.model` and :mod:`scads_drvi.io.result`, and
+``matplotlib``/``seaborn`` only by :mod:`scads_drvi.pl` -- so an environment without them
+can still use the loaders, statistics and scoring. Public names below resolve lazily for
+the same reason.
 """
 
 from __future__ import annotations
@@ -16,9 +21,7 @@ __version__ = "0.1.0"
 
 # name -> submodule it lives in. Resolved on first attribute access so that
 # `import scads_drvi` stays cheap and dependency-light.
-_LAZY = {
-    "Project": "scads_drvi.config",
-}
+_LAZY: dict[str, str] = {}
 
 __all__ = sorted(_LAZY)
 

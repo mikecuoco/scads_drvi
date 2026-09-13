@@ -27,98 +27,76 @@ cd docs && make html
 # open docs/_build/html/index.html
 ```
 
-## The `Project` object
+## The result object
 
-Every path in the pipeline flows through a single {class}`~scads_drvi.config.Project`
-object. Nothing is hard-coded — every directory is either supplied by the caller or
-derived from a `root`:
+A fit's results live in **one `AnnData`**, shaped exactly the way DRVI's own
+interpretability functions expect it: `obs` = cells, `var` = one row per latent
+dimension, `X` = the signed latent representation. There is no separate
+path-configuration object — every function takes an explicit path.
 
 ```python
-import scads_drvi as sd
+from scads_drvi.io.result import build_embed, write_result
 
-proj = sd.Project(
-    root="/path/to/analysis",
-    fit="my_fit",
-    traits=("trait_a", "trait_b"),
+# `model` is a trained scvi.external.DRVI, already loaded (see
+# scads_drvi.factorize.model.load_fit); `adata` is registered against it.
+embed = build_embed(
+    model,
+    adata,
+    obs_columns=["cell_type", "tissue", "donor"],
+    umap=umap_coords,          # a cells x 2 DataFrame, see io.artifacts.read_umap
 )
+write_result("my_fit.h5ad", embed, provenance={"n_latent": 96, "batch_key": "donor"})
 ```
 
-Default directory layout under `root`:
-
-| `Project` field | default |
-|---|---|
-| `data` | `root/data` |
-| `fits` | `data/factorize` |
-| `enrich` | `data/enrich` |
-| `annotations` | `data/annotations` |
-| `figures` | `root/results/figures` |
-
-`fit` and `traits` have **no defaults on purpose** — guessing either silently points
-the pipeline at the wrong inputs.
-
-### Load from a YAML file
-
-```python
-proj = sd.Project.from_yaml("/path/to/project.yaml")
-```
-
-```yaml
-# project.yaml
-root: /path/to/analysis
-fit: my_fit
-traits:
-  - trait_a
-  - trait_b
-```
-
-### Load from environment variables
-
-```bash
-export SCADS_DRVI_ROOT=/path/to/analysis
-```
-
-```python
-proj = sd.Project.from_env(fit="my_fit", traits=("trait_a", "trait_b"))
-```
+`build_embed` populates `embed.var` with DRVI's own per-dimension statistics
+(`model.set_latent_dimension_stats`) — `vanished`, `order`, `title`, and friends — so
+`embed` is immediately usable with `drvi.utils.pl.*` and `drvi.utils.metrics.*`.
 
 ## Reading a finished run
 
-Once a run has completed you can read everything through
-{func}`~scads_drvi.io.artifacts.load_interpretation`:
+```python
+from scads_drvi.io.result import read_result
+
+embed = read_result("my_fit.h5ad")
+embed.var["vanished"]          # DRVI's own per-dimension flag
+embed.obsm["X_umap"]           # the embedding, if one was attached
+```
+
+## Attaching enrichment results
+
+S-LDSC has no DRVI equivalent, so this package still runs it and reads its output — but
+the result now lives in the same h5ad, as one tidy table keyed by `dim` and `direction`
+(there is no persisted `dim_j/pos`/`dim_j/neg` split; a directional loadings view is
+derived on demand, see below):
 
 ```python
-from scads_drvi.io.artifacts import load_interpretation
+from scads_drvi.enrich.config import kept_dims, latent_stats_from_embed, select_factors
+from scads_drvi.enrich.ldsc import read_results
+from scads_drvi.io.result import attach_enrich_results
 
-interp = load_interpretation(
-    proj,
-    model="my_arm",
-    obs_path=proj.data / "matrix.h5ad",
-    obs_columns=["cell_type", "tissue", "donor"],
-    derived={"peak_fraction": ("reads_in_peaks", "total_reads")},
-    umap_path=proj.enrich_dir("my_arm") / "umap.tsv",
-)
+stats = latent_stats_from_embed(embed)
+fmap = select_factors(stats, list(embed.var_names))
+keep = kept_dims(fmap)                       # dims that survive vanished-filtering
+annot2dim = {f"k{i + 1}": dim for i, dim in enumerate(keep)}
 
-interp.traits            # ("trait_a", "trait_b")
-interp.n_cells           # 1_263_026
-interp.labels.n_kept     # 124
+results = read_results(results_root, traits=("trait_a", "trait_b"), annot2dim=annot2dim)
+attach_enrich_results(embed, "my_arm", results, factor_selection=fmap)
+write_result("my_fit.h5ad", embed, provenance=embed.uns["provenance"])
 
-results = interp.for_trait("trait_a")   # per-factor results DataFrame
+arm = embed.uns["enrich"]["my_arm"]
+arm["results"].query("direction == 'pos' and trait == 'trait_a'")
 ```
 
 ## Computing cell scores
 
 ```python
-from scads_drvi.io.artifacts import read_loadings
+from scads_drvi.io.result import directional_loadings
 from scads_drvi.scores.cell import cs_from_z
 
-loadings = read_loadings(
-    proj.contract("my_arm")["loadings"],
-    npz=proj.contract("my_arm")["loadings_npz"],
-    dims=list(interp.labels.kept_dims),
-)
-scores = cs_from_z(
-    loadings, results, model="my_arm", trait="trait_a", labels=interp.labels
-)
+primary = arm["results"].loc[arm["results"]["trait"] == "trait_a"]
+loadings = directional_loadings(embed, "pos")[keep]   # relu(X), the ONLY place a
+                                                        # pos/neg split is materialized
+scores = cs_from_z(loadings, primary, model="my_arm", trait="trait_a")
 
 scores.null    # 0.0  — read this; never hardcode it beside an axis
 scores.label   # "$CS_i$ (z-weighted loading sum)"
@@ -131,14 +109,16 @@ are confined by directory and imported inside functions:
 
 | module | needs |
 |---|---|
-| `factorize/model.py`, `factorize/multigpu.py` | `torch`, `scvi-tools` (function-local) |
-| `viz/` | `matplotlib`, `seaborn` (function-local) |
+| `factorize/model.py` | `torch`, `scvi-tools` (function-local) |
+| `io/result.py` | `anndata` (function-local) |
+| `pl/` | `matplotlib`, `seaborn` (function-local) |
 | `io/h5ad.py` | `h5py` at module scope |
 | `io/artifacts.py` | `h5py`, function-local |
 | everything else | `numpy` / `pandas` / `scipy` / `pyyaml` |
 
-This matters because the environment that runs enrichment stages has no torch, matplotlib,
-seaborn or h5py, and must still import and use the loaders, statistics, and scoring.
+This matters because the environment that runs enrichment stages has no torch, scvi,
+drvi, matplotlib, seaborn, h5py or anndata, and must still import and use the loaders,
+statistics, and scoring.
 
 ## Running the tests
 

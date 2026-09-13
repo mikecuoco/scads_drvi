@@ -12,31 +12,27 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
-from scads_drvi.labels import load_labels  # noqa: E402
-from scads_drvi.stats import add_fdr  # noqa: E402
-from scads_drvi.viz.enrichment import (  # noqa: E402
+from scads_drvi.pl.enrichment import (  # noqa: E402
     covariate_audit,
     grouped_landscape,
     heritability_landscape,
     score_by_group,
     trait_concordance,
 )
-from scads_drvi.viz.factors import (  # noqa: E402
+from scads_drvi.pl.factors import (  # noqa: E402
     covariate_association,
     factor_correlation,
     factor_distributions,
-    group_factor_heatmaps,
-    latent_dimension_stats,
 )
-from scads_drvi.viz.frugal import box_stats, box_stats_by_column  # noqa: E402
-from scads_drvi.viz.umap import (  # noqa: E402
+from scads_drvi.pl.frugal import box_stats, box_stats_by_column  # noqa: E402
+from scads_drvi.pl.umap import (  # noqa: E402
     bare,
     point_style,
     subsample,
     umap_categorical,
     umap_continuous,
-    umap_factor_grid,
 )
+from scads_drvi.stats import add_fdr  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -140,7 +136,7 @@ class TestUmapPanels:
 
     def test_categorical_colours_are_stable_across_subsamples(self, cells):
         """Building the palette from a sampled frame is how one category gets two."""
-        from scads_drvi.viz.color import categorical_palette
+        from scads_drvi.pl.color import categorical_palette
 
         palette = categorical_palette(sorted(cells["grouping"].unique()))
         _, ax_small = umap_categorical(cells, "grouping", n=200, palette=palette)
@@ -173,45 +169,6 @@ class TestUmapPanels:
         bare(ax)
         assert list(ax.get_xticks()) == []
         assert not any(s.get_visible() for s in ax.spines.values())
-
-    def test_factor_grid(self, cells):
-        loadings = pd.DataFrame(
-            np.random.default_rng(2).random((len(cells), 3)),
-            index=cells.index,
-            columns=["dim_0", "dim_1", "dim_2"],
-        )
-        fig = umap_factor_grid(
-            cells[["UMAP_1", "UMAP_2"]], loadings, ["dim_0", "dim_1"], n=500
-        )
-        assert isinstance(fig, Figure)
-
-    def test_factor_grid_checks_names_against_labels(self, cells, tmp_path):
-        fm = tmp_path / "fm.tsv"
-        pd.DataFrame(
-            {
-                "dim": ["dim_0"],
-                "vanished": [False],
-                "kept": [True],
-                "drop_reason": [""],
-                "annot_index": [1],
-            }
-        ).to_csv(fm, sep="\t", index=False)
-        hm = tmp_path / "hm.tsv"
-        pd.DataFrame(
-            {"annot_dim": ["dim_0"], "source_dim": ["dim_9"], "half": ["pos"]}
-        ).to_csv(hm, sep="\t", index=False)
-        labels = load_labels(fm, model="m", half_map=hm)
-        loadings = pd.DataFrame({"dim_9/pos": np.zeros(len(cells))}, index=cells.index)
-        with pytest.raises(KeyError, match="display label"):
-            umap_factor_grid(
-                cells[["UMAP_1", "UMAP_2"]], loadings, ["dim_9/pos"], labels=labels
-            )
-
-    def test_no_shared_cells_is_refused(self, cells):
-        loadings = pd.DataFrame({"dim_0": [0.0]}, index=["zzz"])
-        with pytest.raises(ValueError, match="share no cells"):
-            umap_factor_grid(cells[["UMAP_1", "UMAP_2"]], loadings, ["dim_0"])
-
 
 class TestEnrichmentFigures:
     def test_heritability_landscape(self, results):
@@ -306,23 +263,6 @@ class TestEnrichmentFigures:
 
 
 class TestFactorFigures:
-    def test_latent_dimension_stats_marks_vanished(self):
-        frame = pd.DataFrame(
-            {
-                "dim": [f"dim_{i}" for i in range(6)],
-                "vanished": [False, False, True, False, True, False],
-                "reconstruction_effect": np.linspace(1, 0, 6),
-                "max_value": np.linspace(2, 0, 6),
-            }
-        )
-        fig, axes = latent_dimension_stats(frame)
-        assert isinstance(fig, Figure)
-        assert "2 of 6" in fig.get_suptitle()
-
-    def test_latent_dimension_stats_needs_numbers(self):
-        with pytest.raises(ValueError, match="no numeric columns"):
-            latent_dimension_stats(pd.DataFrame({"dim": ["a"]}), columns=[])
-
     def test_factor_distributions(self):
         rng = np.random.default_rng(0)
         matrix = rng.random((100, 8))
@@ -350,25 +290,6 @@ class TestFactorFigures:
     def test_factor_correlation_needs_square(self):
         with pytest.raises(ValueError, match="square"):
             factor_correlation(pd.DataFrame(np.zeros((2, 3))))
-
-    def test_group_factor_heatmaps_share_one_order(self):
-        rows = [f"g{i}" for i in range(4)]
-        cols = [f"dim_{i}" for i in range(5)]
-        rng = np.random.default_rng(2)
-        first = pd.DataFrame(rng.random((4, 5)), index=rows, columns=cols)
-        second = pd.DataFrame(rng.normal(size=(4, 5)), index=rows, columns=cols)
-        fig, axes = group_factor_heatmaps(
-            [("mean", first, "magma"), ("z", second, "RdBu_r")],
-            grey_columns={"dim_3"},
-        )
-        assert isinstance(fig, Figure)
-        # both panels must show the same row order
-        left = [t.get_text() for t in axes[0].get_yticklabels()]
-        assert left == rows
-
-    def test_group_factor_heatmaps_needs_panels(self):
-        with pytest.raises(ValueError, match="no panels"):
-            group_factor_heatmaps([])
 
     def test_covariate_association(self):
         series = pd.Series(

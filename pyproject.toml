@@ -29,6 +29,7 @@ dependencies = [
     "seaborn>=0.13",
     "scvi-tools>=1.5",
     "torch>=2.4",
+    "drvi-py>=0.2.7",
 ]
 
 [project.optional-dependencies]

@@ -1,10 +1,11 @@
 """Heavy dependencies stay where they are declared to be.
 
-``torch``/``scvi-tools`` belong to :mod:`scads_drvi.factorize.model`,
-``matplotlib``/``seaborn`` to :mod:`scads_drvi.viz`, and ``h5py`` is function-local in
-:mod:`scads_drvi.io`. Everything else must import in an environment that has none of
-them -- which is not hypothetical: the environment that runs the enrichment stages has
-no torch, no matplotlib, no seaborn and no h5py.
+``torch``/``scvi-tools``/``drvi`` belong to :mod:`scads_drvi.factorize.model` and
+:mod:`scads_drvi.io.result`, ``matplotlib``/``seaborn`` to :mod:`scads_drvi.pl`, and
+``h5py``/``anndata`` are function-local wherever a module needs them. Everything else
+must import in an environment that has none of them -- which is not hypothetical: the
+environment that runs the enrichment stages has no torch, no scvi, no drvi, no
+matplotlib, no seaborn, no h5py and no anndata.
 
 The check runs in a subprocess with a meta-path finder blocking those modules, because
 by the time this test module is imported they may already be in ``sys.modules``.
@@ -27,12 +28,11 @@ import pytest
 # while breaking the environment this test exists to protect.
 CORE_MODULES = [
     "scads_drvi",
-    "scads_drvi.config",
-    "scads_drvi.labels",
     "scads_drvi.stats",
     "scads_drvi.scores.cell",
     "scads_drvi.scores.aggregate",
     "scads_drvi.io.artifacts",
+    "scads_drvi.io.result",
     "scads_drvi.io.peaks",
     "scads_drvi.enrich.ldsc",
     "scads_drvi.enrich.h2_output",
@@ -46,13 +46,12 @@ CORE_MODULES = [
 # a module here is a decision someone made, not a gap nobody noticed:
 #
 #   scads_drvi.io.h5ad        module-scope h5py -- it exists to read backed h5ad files
-#   scads_drvi.io.contract    imports io.h5ad
-#   scads_drvi.factorize.*    torch / scvi-tools
-#   scads_drvi.viz.*          matplotlib / seaborn
+#   scads_drvi.factorize.*    torch / scvi-tools / drvi
+#   scads_drvi.pl.*           matplotlib / seaborn
 #   scads_drvi.enrich.config  module-scope numpy, pandas and yaml
 #   scads_drvi._util.presets  argparse CLI plumbing, not part of the library surface
 
-BLOCKED = ("torch", "scvi", "matplotlib", "seaborn", "h5py", "anndata")
+BLOCKED = ("torch", "scvi", "drvi", "matplotlib", "seaborn", "h5py", "anndata")
 
 _BLOCKER = textwrap.dedent(
     """

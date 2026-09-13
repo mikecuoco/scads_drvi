@@ -15,7 +15,6 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from scads_drvi.config import Project  # noqa: E402
 from scads_drvi.factorize.model import (  # noqa: E402
     COMPILE_PREFIX,
     FitMeta,
@@ -57,41 +56,73 @@ def write_checkpoint(path, *, prefixed: bool):
 
 class TestFitMeta:
     def test_reads_and_types_the_record(self, tmp_path):
-        proj = Project(root=tmp_path, fit="f")
-        proj.fit_dir().mkdir(parents=True)
-        (proj.fit_dir() / "fit.meta.json").write_text(json.dumps(META))
-        meta = fit_meta(proj)
+        fit_dir = tmp_path / "f"
+        fit_dir.mkdir(parents=True)
+        (fit_dir / "fit.meta.json").write_text(json.dumps(META))
+        meta = fit_meta(fit_dir)
         assert isinstance(meta, FitMeta)
         assert meta.n_latent == 96
         assert meta.batch_key == "library"
         assert meta.is_gated is True
 
+    def test_reads_the_json_file_directly_too(self, tmp_path):
+        fit_dir = tmp_path / "f"
+        fit_dir.mkdir(parents=True)
+        path = fit_dir / "fit.meta.json"
+        path.write_text(json.dumps(META))
+        assert fit_meta(path).n_latent == 96
+
     def test_unknown_keys_are_kept_in_raw_not_dropped(self, tmp_path):
-        proj = Project(root=tmp_path, fit="f")
-        proj.fit_dir().mkdir(parents=True)
-        (proj.fit_dir() / "fit.meta.json").write_text(json.dumps(META))
-        meta = fit_meta(proj)
+        fit_dir = tmp_path / "f"
+        fit_dir.mkdir(parents=True)
+        (fit_dir / "fit.meta.json").write_text(json.dumps(META))
+        meta = fit_meta(fit_dir)
         assert meta.raw["an_unknown_future_key"] == 7
 
     def test_ungated_fit(self, tmp_path):
-        proj = Project(root=tmp_path, fit="f")
-        proj.fit_dir().mkdir(parents=True)
-        (proj.fit_dir() / "fit.meta.json").write_text(
+        fit_dir = tmp_path / "f"
+        fit_dir.mkdir(parents=True)
+        (fit_dir / "fit.meta.json").write_text(
             json.dumps({"n_latent": 32, "min_fragment": 0})
         )
-        assert fit_meta(proj).is_gated is False
+        assert fit_meta(fit_dir).is_gated is False
 
     def test_missing_record_says_who_writes_it(self, tmp_path):
-        proj = Project(root=tmp_path, fit="f")
         with pytest.raises(FileNotFoundError, match="written by the training run"):
-            fit_meta(proj)
+            fit_meta(tmp_path / "f")
 
     def test_a_record_without_n_latent_is_refused(self, tmp_path):
-        proj = Project(root=tmp_path, fit="f")
-        proj.fit_dir().mkdir(parents=True)
-        (proj.fit_dir() / "fit.meta.json").write_text(json.dumps({"method": "drvi"}))
+        fit_dir = tmp_path / "f"
+        fit_dir.mkdir(parents=True)
+        (fit_dir / "fit.meta.json").write_text(json.dumps({"method": "drvi"}))
         with pytest.raises(ValueError, match="n_latent"):
-            fit_meta(proj)
+            fit_meta(fit_dir)
+
+    def test_reads_provenance_from_a_result_h5ad(self, tmp_path):
+        ad = pytest.importorskip("anndata")
+        np_ = pytest.importorskip("numpy")
+
+        embed = ad.AnnData(X=np_.zeros((2, 2), dtype="float32"))
+        embed.uns["provenance"] = dict(META)
+        path = tmp_path / "result.h5ad"
+        embed.write_h5ad(path)
+
+        meta = fit_meta(path)
+        assert isinstance(meta, FitMeta)
+        assert meta.n_latent == 96
+        assert meta.raw["an_unknown_future_key"] == 7
+
+    def test_h5ad_without_n_latent_is_refused(self, tmp_path):
+        ad = pytest.importorskip("anndata")
+        np_ = pytest.importorskip("numpy")
+
+        embed = ad.AnnData(X=np_.zeros((2, 2), dtype="float32"))
+        embed.uns["provenance"] = {"method": "drvi"}
+        path = tmp_path / "result.h5ad"
+        embed.write_h5ad(path)
+
+        with pytest.raises(ValueError, match="n_latent"):
+            fit_meta(path)
 
 
 class TestCompilePrefix:

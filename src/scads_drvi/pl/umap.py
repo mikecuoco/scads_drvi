@@ -7,6 +7,13 @@ Point size is derived from the point count rather than typed. The code this repl
 ``s=5`` in one place and ``s=0.10`` in another -- a 50x difference that is a consequence
 of drawing 60,000 points versus 1.26 million, not a stylistic choice, and therefore
 something to compute.
+
+A per-factor grid over one embedding -- what this module used to call
+``umap_factor_grid`` -- is now ``drvi.utils.pl.plot_latent_dims_in_umap(embed,
+directional=..., dim_subset=..., order_col="order")``, driven by the ``obsm["X_umap"]``
+and ``var`` columns :func:`scads_drvi.io.result.build_embed` already sets. Apply
+:func:`scads_drvi.pl.style.apply_style`/:func:`scads_drvi.pl.save.save_figure` to the
+figure it returns, same as any other figure here.
 """
 
 from __future__ import annotations
@@ -29,7 +36,6 @@ __all__ = [
     "bare",
     "umap_categorical",
     "umap_continuous",
-    "umap_factor_grid",
 ]
 
 SUBSAMPLE_DEFAULT = 60_000
@@ -149,7 +155,7 @@ def umap_categorical(
     """
     import matplotlib.pyplot as plt
 
-    from scads_drvi.viz.color import categorical_palette
+    from scads_drvi.pl.color import categorical_palette
 
     if hue not in frame.columns:
         raise KeyError(f"{hue!r} is not a column of the frame")
@@ -207,7 +213,7 @@ def umap_continuous(
     """
     import matplotlib.pyplot as plt
 
-    from scads_drvi.viz.color import ROBUST_LIMITS, robust_norm
+    from scads_drvi.pl.color import ROBUST_LIMITS, robust_norm
 
     if value not in frame.columns:
         raise KeyError(f"{value!r} is not a column of the frame")
@@ -243,62 +249,3 @@ def umap_continuous(
         bar = fig.colorbar(mappable, ax=ax, pad=0.02, fraction=0.045)
         bar.set_label(colorbar_label or value)
     return fig, ax
-
-
-def umap_factor_grid(
-    coords: pd.DataFrame,
-    loadings: pd.DataFrame,
-    factors: Sequence[str],
-    *,
-    ncols: int = 3,
-    titles: Mapping[str, str] | None = None,
-    cmap: str = "magma",
-    percentiles: tuple[float, float] = (2.0, 98.0),
-    zero_as_background: bool = True,
-    n: int | None = SUBSAMPLE_DEFAULT,
-    labels=None,
-) -> Figure:
-    """A grid of per-factor panels over one embedding, each on its own colour scale.
-
-    `labels` is an optional :class:`~scads_drvi.labels.FactorLabels`; when given, the
-    factor names are checked against it before the matrix is indexed and the panel titles
-    use the display names.
-    """
-    import matplotlib.pyplot as plt
-
-    factors = list(factors)
-    if not factors:
-        raise ValueError("no factors to draw")
-    if labels is not None:
-        labels.assert_index_dims(factors)
-    missing = [f for f in factors if f not in loadings.columns]
-    if missing:
-        raise KeyError(f"loadings has no column(s) {missing}")
-
-    shared = coords.index.intersection(loadings.index)
-    if len(shared) == 0:
-        raise ValueError("the coordinates and the loadings share no cells")
-
-    nrows = int(np.ceil(len(factors) / ncols))
-    fig, axes = plt.subplots(
-        nrows, ncols, figsize=(3.0 * ncols, 2.8 * nrows), squeeze=False
-    )
-    flat = axes.ravel()
-
-    for slot, factor in enumerate(factors):
-        ax = flat[slot]
-        frame = coords.loc[shared].copy()
-        frame[factor] = loadings.loc[shared, factor].to_numpy()
-        umap_continuous(
-            frame, factor, ax=ax, cmap=cmap, percentiles=percentiles,
-            zero_as_background=zero_as_background, colorbar=True, n=n,
-        )
-        title = (titles or {}).get(factor)
-        if title is None and labels is not None:
-            title = labels.display_label(factor)
-        ax.set_title(title or factor)
-        bare(ax)
-
-    for slot in range(len(factors), len(flat)):
-        flat[slot].set_visible(False)
-    return fig

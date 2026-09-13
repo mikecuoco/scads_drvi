@@ -362,7 +362,56 @@ def kept_dims(fmap: pd.DataFrame) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# The factorize contract
+# The result h5ad (see scads_drvi.io.result) -- current path
+# ---------------------------------------------------------------------------
+
+def latent_stats_from_embed(embed) -> pd.DataFrame:
+    """``embed.var`` reshaped to the ``dim, vanished, ...`` frame :func:`select_factors`
+    expects.
+
+    Replaces :func:`read_latent_stats` for a fit stored as a result h5ad: DRVI's own
+    ``model.set_latent_dimension_stats`` already wrote these columns onto ``embed.var``
+    when the object was built (:func:`scads_drvi.io.result.build_embed`), so there is no
+    file left to read -- this just gives the in-memory table the shape the rest of this
+    module was written against.
+    """
+    frame = embed.var.reset_index(names="dim")
+    frame["dim"] = frame["dim"].astype(str)
+    for column in ("vanished", "vanished_positive_direction", "vanished_negative_direction"):
+        if column in frame.columns:
+            frame[column] = _as_bool(frame[column])
+    return frame
+
+
+def kept_loadings(embed, fmap: pd.DataFrame):
+    """cells x kept-dims, straight from a result h5ad's signed ``X`` -- no ReLU.
+
+    A caller that needs one direction's non-negative loadings (for S-LDSC's top-frac
+    annotation ranking) derives it explicitly with
+    :func:`scads_drvi.io.result.directional_loadings` first; this function only
+    subsets to the kept dimensions, in `fmap`'s order, from whatever `embed` it is given.
+    """
+    import pandas as pd
+
+    keep = kept_dims(fmap)
+    frame = pd.DataFrame(embed[:, keep].X, index=embed.obs_names, columns=keep)
+    return frame
+
+
+def kept_feature_loadings(feature_loadings, fmap: pd.DataFrame):
+    """peaks x kept-dims, from the companion loadings h5ad
+    (:func:`scads_drvi.io.result.read_feature_loadings`)."""
+    import pandas as pd
+
+    keep = kept_dims(fmap)
+    frame = pd.DataFrame(
+        feature_loadings[:, keep].X, index=feature_loadings.obs_names, columns=keep
+    )
+    return frame
+
+
+# ---------------------------------------------------------------------------
+# The factorize contract (legacy: topic_loadings.tsv / topic_factors.tsv)
 # ---------------------------------------------------------------------------
 
 def read_loadings(path: str | Path) -> pd.DataFrame:

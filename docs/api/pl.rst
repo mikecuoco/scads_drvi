@@ -1,30 +1,30 @@
 scads\_drvi.viz
 ===============
 
-.. automodule:: scads_drvi.viz.style
+.. automodule:: scads_drvi.pl.style
    :members:
    :show-inheritance:
 
-.. automodule:: scads_drvi.viz.color
+.. automodule:: scads_drvi.pl.color
    :members:
    :show-inheritance:
 
-.. automodule:: scads_drvi.viz.umap
+.. automodule:: scads_drvi.pl.umap
    :members:
    :show-inheritance:
 
-.. automodule:: scads_drvi.viz.enrichment
+.. automodule:: scads_drvi.pl.enrichment
    :members:
    :show-inheritance:
 
-.. automodule:: scads_drvi.viz.factors
+.. automodule:: scads_drvi.pl.factors
    :members:
    :show-inheritance:
 
-.. automodule:: scads_drvi.viz.frugal
+.. automodule:: scads_drvi.pl.frugal
    :members:
    :show-inheritance:
 
-.. automodule:: scads_drvi.viz.save
+.. automodule:: scads_drvi.pl.save
    :members:
    :show-inheritance:

@@ -12,7 +12,6 @@ environment that has none.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,17 +20,12 @@ import numpy as np
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
 
-    from scads_drvi.config import Project
-    from scads_drvi.labels import FactorLabels
-
 __all__ = [
     "obs_columns",
     "read_obs",
     "cell_metadata",
     "read_loadings",
     "read_umap",
-    "Interpretation",
-    "load_interpretation",
 ]
 
 
@@ -256,118 +250,3 @@ def read_umap(
             raise ValueError("columns must name exactly two axes")
         frame.columns = list(columns)
     return frame
-
-
-@dataclass(frozen=True)
-class Interpretation:
-    """Everything needed to read one enrichment arm, loaded and joined.
-
-    Replaces the ~89-line setup cell that each interpretation notebook carried its own
-    copy of.
-    """
-
-    model: str
-    labels: FactorLabels
-    results: pd.DataFrame
-    cells: pd.DataFrame
-    loadings: pd.DataFrame | None = field(default=None, repr=False)
-    meta: dict = field(default_factory=dict)
-
-    @property
-    def traits(self) -> tuple[str, ...]:
-        return tuple(self.results["trait"].unique())
-
-    @property
-    def n_cells(self) -> int:
-        return len(self.cells)
-
-    def for_trait(self, trait: str) -> pd.DataFrame:
-        """The results rows for one trait, which is what scoring and plotting take."""
-        block = self.results.loc[self.results["trait"] == trait]
-        if block.empty:
-            raise KeyError(
-                f"no results for trait {trait!r}; this arm has {list(self.traits)}"
-            )
-        return block
-
-
-def load_interpretation(
-    project: Project,
-    model: str,
-    *,
-    traits: Sequence[str] | None = None,
-    fit: str | None = None,
-    obs_path: str | Path | None = None,
-    obs_columns: Sequence[str] | None = None,
-    obs_index: str | None = None,
-    derived: Mapping[str, tuple[str, str]] | None = None,
-    umap_path: str | Path | None = None,
-    loadings: bool = False,
-    half_map: str | Path | None = None,
-    style: str = "dim",
-    strict: bool = True,
-) -> Interpretation:
-    """Load one arm: labels, results, per-cell metadata, optionally the loadings.
-
-    `traits` defaults to ``project.traits``. `loadings=False` by default because the
-    matrix is the expensive part and many questions do not need it.
-
-    Everything about the cell table -- which obs columns, which index, which derived
-    ratios -- is passed in. This function knows the shape of a run, not the meaning of
-    a dataset.
-    """
-    import pandas as pd
-
-    from scads_drvi.enrich.ldsc import read_results
-    from scads_drvi.labels import load_labels
-
-    contract = project.contract(model, fit=fit)
-    traits = list(traits) if traits is not None else list(project.traits)
-    if not traits:
-        raise ValueError(
-            "no traits given and Project.traits is empty; name the traits to read"
-        )
-
-    if half_map is None:
-        candidate = contract["half_map"]
-        half_map = candidate if candidate.exists() else None
-
-    labels = load_labels(
-        contract["factor_map"], model=model, half_map=half_map, style=style
-    )
-    results = read_results(
-        contract["results"], traits=traits, labels=labels, strict=strict
-    )
-
-    cells = pd.DataFrame()
-    if obs_path is not None:
-        cells = cell_metadata(
-            obs_path, columns=obs_columns, index=obs_index, derived=derived
-        )
-
-    if umap_path is not None:
-        coords = read_umap(umap_path)
-        cells = coords.join(cells, how="left") if len(cells) else coords
-
-    matrix = None
-    if loadings:
-        matrix = read_loadings(
-            contract["loadings"], npz=contract["loadings_npz"], dims=labels.kept_dims
-        )
-
-    meta = {
-        "model": model,
-        "fit": fit if fit is not None else project.fit,
-        "traits": traits,
-        "n_kept": labels.n_kept,
-        "is_split": labels.is_split,
-        "paths": {k: str(v) for k, v in contract.items()},
-    }
-    return Interpretation(
-        model=model,
-        labels=labels,
-        results=results,
-        cells=cells,
-        loadings=matrix,
-        meta=meta,
-    )

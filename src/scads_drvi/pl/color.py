@@ -205,7 +205,7 @@ def categorical_palette(
     """
     from matplotlib import colormaps
 
-    from scads_drvi.viz.style import WONG
+    from scads_drvi.pl.style import WONG
 
     unique = sorted(dict.fromkeys(str(c) for c in categories))
     n = len(unique)

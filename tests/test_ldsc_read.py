@@ -6,7 +6,6 @@ import pandas as pd
 import pytest
 
 from scads_drvi.enrich.ldsc import Z_COLUMN, read_results, results_files
-from scads_drvi.labels import load_labels
 
 
 def write_results(path, z, *, extra_rows=0):
@@ -19,24 +18,17 @@ def write_results(path, z, *, extra_rows=0):
 
 @pytest.fixture
 def arm(tmp_path):
-    fm = tmp_path / "factor_map.tsv"
-    pd.DataFrame(
-        {
-            "dim": ["dim_0", "dim_1", "dim_2"],
-            "vanished": [False, False, False],
-            "kept": [True, True, False],
-            "drop_reason": ["", "", "annot_too_small"],
-            "annot_index": [1, 2, None],
-        }
-    ).to_csv(fm, sep="\t", index=False)
-    labels = load_labels(fm, model="arm")
-
+    """(annot2dim, results_root) for two kept factors -- the mapping
+    :func:`scads_drvi.enrich.config.select_factors`/``kept_dims`` would hand this
+    function, not a dropped third dimension (which is that module's own concern, not
+    read_results')."""
+    annot2dim = {"k1": "dim_0", "k2": "dim_1"}
     root = tmp_path / "results"
     for trait, zs in {"t1": (4.0, 1.0), "t2": (0.5, 3.0)}.items():
         (root / trait).mkdir(parents=True)
         for annot, z in zip(("k1", "k2"), zs, strict=True):
             write_results(root / trait / f"{annot}.results", z)
-    return labels, root
+    return annot2dim, root
 
 
 class TestResultsFiles:
@@ -51,53 +43,50 @@ class TestResultsFiles:
 
 class TestReadResults:
     def test_one_row_per_factor_per_trait(self, arm):
-        labels, root = arm
-        frame = read_results(root, traits=["t1", "t2"], labels=labels)
+        annot2dim, root = arm
+        frame = read_results(root, traits=["t1", "t2"], annot2dim=annot2dim)
         assert len(frame) == 4
         assert set(frame["trait"]) == {"t1", "t2"}
         assert set(frame["dim"]) == {"dim_0", "dim_1"}
 
-    def test_dropped_factors_are_not_read(self, arm):
-        labels, root = arm
-        frame = read_results(root, traits=["t1"], labels=labels)
-        assert "dim_2" not in set(frame["dim"])
-
-    def test_row_zero_is_the_factors_own_annotation(self, tmp_path, arm):
+    def test_row_zero_is_the_factors_own_annotation(self, arm):
         """Baseline categories follow it; taking the wrong row silently reports the
         heritability of an unrelated annotation."""
-        labels, root = arm
+        annot2dim, root = arm
         for annot in ("k1", "k2"):
             write_results(root / "t1" / f"{annot}.results", 4.0, extra_rows=3)
-        frame = read_results(root, traits=["t1"], labels=labels)
+        frame = read_results(root, traits=["t1"], annot2dim=annot2dim)
         assert list(frame["Category"]) == ["k1L2_0", "k2L2_0"]
 
     def test_row_can_be_overridden(self, arm):
-        labels, root = arm
+        annot2dim, root = arm
         for annot in ("k1", "k2"):
             write_results(root / "t1" / f"{annot}.results", 4.0, extra_rows=2)
-        frame = read_results(root, traits=["t1"], labels=labels, row=1, fdr=False)
+        frame = read_results(
+            root, traits=["t1"], annot2dim=annot2dim, row=1, fdr=False
+        )
         assert set(frame["Category"]) == {"baseline_0"}
 
     def test_row_out_of_range_is_explained(self, arm):
-        labels, root = arm
+        annot2dim, root = arm
         with pytest.raises(ValueError, match="rows; row 9 was requested"):
-            read_results(root, traits=["t1"], labels=labels, row=9)
+            read_results(root, traits=["t1"], annot2dim=annot2dim, row=9)
 
     def test_a_missing_result_file_raises_by_default(self, arm):
-        labels, root = arm
+        annot2dim, root = arm
         (root / "t1" / "k2.results").unlink()
         with pytest.raises(FileNotFoundError, match="optimistic"):
-            read_results(root, traits=["t1"], labels=labels)
+            read_results(root, traits=["t1"], annot2dim=annot2dim)
 
     def test_strict_false_allows_a_partial_table(self, arm):
-        labels, root = arm
+        annot2dim, root = arm
         (root / "t1" / "k2.results").unlink()
-        frame = read_results(root, traits=["t1"], labels=labels, strict=False)
+        frame = read_results(root, traits=["t1"], annot2dim=annot2dim, strict=False)
         assert len(frame) == 1
 
     def test_fdr_columns_are_added_within_trait(self, arm):
-        labels, root = arm
-        frame = read_results(root, traits=["t1", "t2"], labels=labels)
+        annot2dim, root = arm
+        frame = read_results(root, traits=["t1", "t2"], annot2dim=annot2dim)
         assert {"p_1tailed", "fdr_q"} <= set(frame.columns)
         # z=4.0 in t1 and z=3.0 in t2 are each the best in their own trait
         best = frame.loc[frame.groupby("trait")["fdr_q"].idxmin()]
@@ -107,16 +96,29 @@ class TestReadResults:
         }
 
     def test_fdr_can_be_skipped(self, arm):
-        labels, root = arm
-        frame = read_results(root, traits=["t1"], labels=labels, fdr=False)
+        annot2dim, root = arm
+        frame = read_results(root, traits=["t1"], annot2dim=annot2dim, fdr=False)
         assert "fdr_q" not in frame.columns
 
-    def test_display_column_is_present(self, arm):
-        labels, root = arm
-        frame = read_results(root, traits=["t1"], labels=labels)
-        assert list(frame["display"]) == ["dim_0", "dim_1"]
+    def test_direction_defaults_to_combined(self, arm):
+        annot2dim, root = arm
+        frame = read_results(root, traits=["t1"], annot2dim=annot2dim)
+        assert set(frame["direction"]) == {"combined"}
+
+    def test_direction_can_be_a_mapping_per_annotation(self, arm):
+        """This is how a caller records which sign of the latent dimension a result
+        came from -- see :func:`scads_drvi.io.result.directional_loadings`, which is
+        where that split is actually derived and computed."""
+        annot2dim, root = arm
+        frame = read_results(
+            root, traits=["t1"], annot2dim=annot2dim, direction={"k1": "pos", "k2": "neg"}
+        )
+        assert dict(zip(frame["annot"], frame["direction"], strict=True)) == {
+            "k1": "pos",
+            "k2": "neg",
+        }
 
     def test_no_traits_is_refused(self, arm):
-        labels, root = arm
+        annot2dim, root = arm
         with pytest.raises(ValueError, match="no traits"):
-            read_results(root, traits=[], labels=labels)
+            read_results(root, traits=[], annot2dim=annot2dim)

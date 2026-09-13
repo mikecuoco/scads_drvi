@@ -104,7 +104,7 @@ def test_coordinate_detection_survives_a_string_dtype_column():
     matplotlib = pytest.importorskip("matplotlib")
     matplotlib.use("Agg")
 
-    from scads_drvi.viz.umap import umap_continuous
+    from scads_drvi.pl.umap import umap_continuous
 
     frame = pd.DataFrame(
         {
@@ -117,24 +117,4 @@ def test_coordinate_detection_survives_a_string_dtype_column():
     fig, ax = umap_continuous(frame, "value", n=None)
     assert ax.get_xlabel() == "x"
     matplotlib.pyplot.close(fig)
-
-
-@pytest.mark.skipif(
-    not hasattr(pd, "StringDtype"), reason="pandas too old to have StringDtype"
-)
-def test_latent_dimension_stats_survives_a_string_dtype_column():
-    matplotlib = pytest.importorskip("matplotlib")
-    matplotlib.use("Agg")
-
-    from scads_drvi.viz.factors import latent_dimension_stats
-
-    frame = pd.DataFrame(
-        {
-            "dim": pd.array(["dim_0", "dim_1"], dtype=pd.StringDtype()),
-            "vanished": [False, True],
-            "effect": [1.0, 0.0],
-        }
-    )
-    fig, _ = latent_dimension_stats(frame)
-    assert "1 of 2" in fig.get_suptitle()
     matplotlib.pyplot.close(fig)

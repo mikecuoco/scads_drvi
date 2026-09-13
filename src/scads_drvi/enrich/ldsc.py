@@ -16,14 +16,12 @@ making every surviving q-value optimistic without saying so.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
-
-    from scads_drvi.labels import FactorLabels
 
 __all__ = ["read_results", "results_files"]
 
@@ -43,7 +41,8 @@ def read_results(
     results_root: str | Path,
     *,
     traits: Iterable[str],
-    labels: FactorLabels,
+    annot2dim: Mapping[str, str],
+    direction: str | Mapping[str, str] = "combined",
     row: int = 0,
     strict: bool = True,
     fdr: bool = True,
@@ -52,14 +51,27 @@ def read_results(
     """Every trait's per-factor results as one tidy frame.
 
     `results_root` holds one directory per trait. Each is expected to contain a
-    ``.results`` file for every kept factor in `labels`.
+    ``.results`` file for every annotation name in `annot2dim` -- typically
+    :func:`scads_drvi.enrich.config.select_factors`'s ``k{i}`` numbering mapped back to
+    ``dim`` names (:func:`scads_drvi.enrich.config.kept_dims`, zipped against the
+    annotation names it was assigned).
+
+    `direction` records which sign of the latent dimension each result came from --
+    ``"combined"`` when the arm was not run per-direction, or a mapping from annotation
+    name to ``"pos"``/``"neg"`` when it was (see
+    :func:`scads_drvi.io.result.directional_loadings`, which is where a pos/neg loadings
+    view is built; this function only records which one a result file came from). This
+    ``dim``/``direction`` pair is what replaces the old split contract's
+    ``half_map.tsv`` and three-name label system: a caller filters
+    ``results.query("direction == 'pos' and trait == 'X'")`` instead of resolving an
+    annotation-name alias.
 
     With ``strict=True`` a kept factor whose result file is absent raises, naming the
     missing ones. Set it False only when you deliberately want a partial table, and note
     that the FDR correction is then over fewer tests than were intended.
 
-    Adds ``trait``, ``annot``, ``dim`` and ``display`` columns, and -- with ``fdr=True``
-    -- a one-tailed p and BH q corrected within each `by` group.
+    Adds ``trait``, ``annot``, ``dim`` and ``direction`` columns, and -- with
+    ``fdr=True`` -- a one-tailed p and BH q corrected within each `by` group.
     """
     import pandas as pd
 
@@ -70,18 +82,21 @@ def read_results(
     if not traits:
         raise ValueError("no traits requested")
 
+    def _direction_for(annot: str) -> str:
+        return direction if isinstance(direction, str) else direction[annot]
+
     records = []
     for trait in traits:
         found = results_files(results_root / trait)
-        missing = [a for a in labels.annot2dim if a not in found]
+        missing = [a for a in annot2dim if a not in found]
         if missing and strict:
             raise FileNotFoundError(
-                f"trait {trait!r} is missing {len(missing)} of {len(labels.annot2dim)} "
+                f"trait {trait!r} is missing {len(missing)} of {len(annot2dim)} "
                 f"result files, e.g. {missing[:5]}. Skipping them would shrink the "
                 f"multiplicity denominator and make every surviving q optimistic; pass "
                 f"strict=False if a partial table is genuinely what you want."
             )
-        for annot, dim in labels.annot2dim.items():
+        for annot, dim in annot2dim.items():
             path = found.get(annot)
             if path is None:
                 continue
@@ -95,7 +110,7 @@ def read_results(
             record["trait"] = trait
             record["annot"] = annot
             record["dim"] = dim
-            record["display"] = labels.display_label(dim)
+            record["direction"] = _direction_for(annot)
             records.append(record)
 
     if not records:

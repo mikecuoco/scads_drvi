@@ -31,8 +31,6 @@ import numpy as np
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
 
-    from scads_drvi.labels import FactorLabels
-
 __all__ = [
     "ScoreKind",
     "NULL_VALUE",
@@ -141,15 +139,18 @@ def cs_from_z(
     *,
     model: str,
     trait: str,
-    labels: FactorLabels | None = None,
     column: str = "Coefficient_z-score",
     clip_negative: bool = True,
     chunk_rows: int = 200_000,
 ) -> CellScores:
     """``cs_i = sum_k L_ik * max(0, z_k)`` -- the interpretation notebooks' score.
 
-    `loadings` is cells x factors. Only the factors present in `results` are used, in
-    the order `results` gives them.
+    `loadings` is cells x factors -- for a directional score, pass
+    :func:`scads_drvi.io.result.directional_loadings`'s output. Only the factors present
+    in `results` are used, in the order `results` gives them; when `results` carries a
+    ``direction`` column, filter it to one direction before calling this (e.g.
+    ``results.query("direction == 'pos'")``) so the weights line up with a `loadings`
+    that was ReLU'd the same way.
 
     Computed in row chunks: the loadings table is hundreds of megabytes and the
     notebooks materialised the whole product at once.
@@ -166,8 +167,6 @@ def cs_from_z(
             f"Results name e.g. {results['dim'].tolist()[:3]}; loadings columns are "
             f"e.g. {list(loadings.columns)[:3]}."
         )
-    if labels is not None:
-        labels.assert_index_dims(dims)
 
     weights = factor_weights(
         results, dims=dims, column=column, clip_negative=clip_negative

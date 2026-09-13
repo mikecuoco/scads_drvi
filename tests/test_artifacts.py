@@ -1,4 +1,4 @@
-"""io.artifacts: the h5ad decode, the loadings reader, and load_interpretation."""
+"""io.artifacts: the h5ad decode and the loadings reader."""
 
 from __future__ import annotations
 
@@ -9,9 +9,7 @@ import pytest
 h5py = pytest.importorskip("h5py")
 
 from scads_drvi.io.artifacts import (  # noqa: E402
-    Interpretation,
     cell_metadata,
-    load_interpretation,
     obs_columns,
     read_loadings,
     read_obs,
@@ -234,81 +232,3 @@ class TestReadUmap:
     def test_missing_file_is_named(self, tmp_path):
         with pytest.raises(FileNotFoundError, match="no embedding"):
             read_umap(tmp_path / "absent.tsv")
-
-
-class TestLoadInterpretation:
-    @pytest.fixture
-    def project(self, tmp_path):
-        from scads_drvi.config import Project
-
-        proj = Project(root=tmp_path, fit="a_fit", traits=("t1",))
-        arm = proj.enrich_dir("arm")
-        (arm / "results" / "t1").mkdir(parents=True)
-        pd.DataFrame(
-            {
-                "dim": ["dim_0", "dim_1"],
-                "vanished": [False, False],
-                "kept": [True, True],
-                "drop_reason": ["", ""],
-                "annot_index": [1, 2],
-            }
-        ).to_csv(arm / "factor_map.tsv", sep="\t", index=False)
-        for annot, z in (("k1", 4.0), ("k2", 1.0)):
-            pd.DataFrame(
-                {"Category": [f"{annot}L2_0"], "Coefficient_z-score": [z]}
-            ).to_csv(arm / "results" / "t1" / f"{annot}.results", sep="\t", index=False)
-
-        fit = proj.fit_dir()
-        fit.mkdir(parents=True)
-        np.savez(
-            fit / "topic_loadings.npz",
-            cells=np.array(["lib_0:bc_0", "lib_1:bc_1"], dtype=object),
-            factors=np.array(["dim_0", "dim_1"]),
-            loadings=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
-        )
-        return proj
-
-    def test_loads_labels_and_results(self, project):
-        interp = load_interpretation(project, "arm")
-        assert isinstance(interp, Interpretation)
-        assert interp.labels.n_kept == 2
-        assert len(interp.results) == 2
-        assert interp.traits == ("t1",)
-
-    def test_loadings_are_opt_in(self, project):
-        assert load_interpretation(project, "arm").loadings is None
-        with_matrix = load_interpretation(project, "arm", loadings=True)
-        assert with_matrix.loadings.shape == (2, 2)
-
-    def test_cells_are_empty_without_an_obs_path(self, project):
-        assert load_interpretation(project, "arm").cells.empty
-
-    def test_obs_and_umap_are_joined(self, project, tmp_path):
-        obs = write_h5ad_obs(tmp_path / "m.h5ad", n=2)
-        umap = tmp_path / "umap.tsv"
-        pd.DataFrame(
-            {"cell": ["lib_0:bc_0", "lib_1:bc_1"], "x": [0.0, 1.0], "y": [2.0, 3.0]}
-        ).set_index("cell").to_csv(umap, sep="\t")
-        interp = load_interpretation(
-            project, "arm", obs_path=obs, umap_path=umap, obs_columns=["grouping"]
-        )
-        assert interp.n_cells == 2
-        assert {"x", "y", "grouping"} <= set(interp.cells.columns)
-
-    def test_for_trait_selects_and_explains(self, project):
-        interp = load_interpretation(project, "arm")
-        assert len(interp.for_trait("t1")) == 2
-        with pytest.raises(KeyError, match="this arm has"):
-            interp.for_trait("absent")
-
-    def test_meta_records_provenance(self, project):
-        meta = load_interpretation(project, "arm").meta
-        assert meta["model"] == "arm"
-        assert meta["n_kept"] == 2
-        assert meta["is_split"] is False
-        assert "factor_map" in meta["paths"]
-
-    def test_no_traits_anywhere_is_refused(self, project):
-        bare = project.replace(traits=())
-        with pytest.raises(ValueError, match="name the traits"):
-            load_interpretation(bare, "arm")

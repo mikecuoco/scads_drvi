@@ -5,6 +5,27 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Breaking: a fit's results now live in one `AnnData` (`io.result`), not a directory
+  of TSVs plus a `Project`.** `config.Project`, `io.contract`, `io.meta`, `labels`
+  (`FactorLabels`, `load_labels`, the `dim_j`/`k{i}`/`dim_47/neg` three-name system) and
+  `io.artifacts.Interpretation`/`load_interpretation` are **deleted**. In their place:
+  `io.result.build_embed`/`write_result`/`read_result`/`attach_enrich_results`/
+  `directional_loadings` build, save and load one `obs`=cells, `var`=one-row-per-dim
+  object shaped exactly the way DRVI's own interpretability API expects, with S-LDSC
+  results embedded as a tidy `dim`/`direction`/`trait` table in `uns["enrich"][model]`.
+  There is no persisted pos/neg split — DRVI has none either — a directional loadings
+  view is derived on demand from the canonical signed matrix. `factorize.model.fit_meta`
+  and `.load_fit` now take explicit paths; `enrich.ldsc.read_results` takes an
+  `annot2dim` mapping and a `direction` instead of a `FactorLabels`;
+  `scores.cell.cs_from_z` drops its `labels=` argument, made unnecessary by the above.
+- **`viz` renamed to `pl`.** Two of its functions are deleted because DRVI's own package
+  now covers them directly: `latent_dimension_stats` (use
+  `drvi.utils.pl.plot_latent_dimension_stats`) and `group_factor_heatmaps` (use
+  `drvi.utils.pl.plot_latent_dims_in_heatmap`); `umap.umap_factor_grid` is likewise
+  replaced by `drvi.utils.pl.plot_latent_dims_in_umap`. `drvi-py` is a new required
+  dependency, imported function-local everywhere it's used.
+
 ### Added
 - `enrich.annotations` — widens a thin annotation into the full `CHR BP SNP CM + K`
   form `--overlap-annot` requires, and works around the reader's integer type inference.
