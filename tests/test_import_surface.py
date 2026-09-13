@@ -45,9 +45,7 @@ CORE_MODULES = [
 # a module here is a decision someone made, not a gap nobody noticed:
 #
 #   scads_drvi.factorize.h5ad     module-scope h5py -- it exists to read backed h5ad files
-#   scads_drvi.factorize.model    torch / scvi-tools / drvi -- also carries the
-#                                 torchrun/multi-GPU plumbing (Ranks and friends),
-#                                 meaningless without torch regardless
+#   scads_drvi.factorize.model    torch / scvi-tools / drvi
 #   scads_drvi.factorize.kernels  conceptually part of the model-training surface,
 #                                 same as .model, even though it is numpy-only itself
 #   scads_drvi.pl.*               matplotlib / seaborn

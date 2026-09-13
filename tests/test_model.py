@@ -22,7 +22,6 @@ from scads_drvi.factorize.model import (  # noqa: E402
     fit_meta,
     has_compile_prefix,
     latent,
-    load_kwargs,
     repair_compile_prefix,
     split_responsibility,
 )
@@ -265,11 +264,6 @@ class TestCompilePrefix:
         out = repair_compile_prefix(src, tmp_path / "unwrapped")
         blob = torch.load(out / "model.pt", map_location="cpu", weights_only=False)
         assert blob["var_names"] == ["a", "b"]
-
-
-class TestLoadKwargs:
-    def test_no_rank_means_no_device_pinning(self):
-        assert load_kwargs(None) == {}
 
 
 class FakeModel:

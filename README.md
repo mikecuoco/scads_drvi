@@ -87,8 +87,8 @@ embed.var["vanished"]      # DRVI's own per-dimension flag
 ```
 
 `train_fit` trains, saves the checkpoint, and writes the result h5ad in one call. Given
-a checkpoint from elsewhere (e.g. a multi-GPU `torchrun` job), `factorize.model.load_fit`
-and `factorize.result.build_embed`/`write_result` do the same, split across two calls.
+a checkpoint from elsewhere, `factorize.model.load_fit` and
+`factorize.result.build_embed`/`write_result` do the same, split across two calls.
 
 ## Reading a finished run
 
@@ -127,7 +127,7 @@ lazily. Heavy dependencies are confined by directory:
 
 | module | needs |
 |---|---|
-| `factorize/model.py` | `torch`, `scvi-tools` (function-local; also carries torchrun/multi-GPU plumbing) |
+| `factorize/model.py` | `torch`, `scvi-tools` (function-local) |
 | `factorize/result.py` | `anndata` (function-local) |
 | `pl/` | `matplotlib`, `seaborn` (function-local) |
 | `factorize/h5ad.py` | `h5py` at module scope — it *is* the h5ad reader |

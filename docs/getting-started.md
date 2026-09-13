@@ -54,8 +54,7 @@ populated with DRVI's own per-dimension statistics (`model.set_latent_dimension_
 — `vanished`, `order`, `title`, and friends — so `embed` is immediately usable with
 `drvi.utils.pl.*` and `drvi.utils.metrics.*`.
 
-Given a checkpoint trained elsewhere (e.g. a multi-GPU `torchrun` job using
-`scads_drvi.factorize.model.init_ranks` and friends), `load_fit` picks it back up and
+Given a checkpoint trained elsewhere, `load_fit` picks it back up and
 `build_embed`/`write_result` do the same two steps split apart:
 
 ```python
@@ -126,7 +125,7 @@ are confined by directory and imported inside functions:
 
 | module | needs |
 |---|---|
-| `factorize/model.py` | `torch`, `scvi-tools` (function-local; also carries torchrun/multi-GPU plumbing) |
+| `factorize/model.py` | `torch`, `scvi-tools` (function-local) |
 | `factorize/result.py` | `anndata` (function-local) |
 | `pl/` | `matplotlib`, `seaborn` (function-local) |
 | `factorize/h5ad.py` | `h5py` at module scope |

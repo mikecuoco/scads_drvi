@@ -26,7 +26,7 @@ an explicit path, and a bare read is just `anndata.read_h5ad(path)`.
 
 | module | role |
 |---|---|
-| `factorize.model` | load or **train** a fit, latent in requested row order, split responsibility, torchrun/multi-GPU plumbing |
+| `factorize.model` | load or **train** a fit, latent in requested row order, split responsibility |
 | `factorize.result` | `build_embed`, `write_result`, `attach_enrich_results`, `directional_loadings` |
 | `factorize.h5ad` | backed-CSR reads, cell gating by depth |
 | `stats` | one-tailed p, Benjamini–Hochberg, BH-boundary z |

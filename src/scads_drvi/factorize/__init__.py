@@ -1,1 +1,1 @@
-"""DRVI model access, kernels, contracts and multi-GPU plumbing."""
+"""DRVI model access, training, and kernels."""
