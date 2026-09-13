@@ -125,6 +125,103 @@ class TestFitMeta:
             fit_meta(path)
 
 
+class _FakeDRVI:
+    """Stands in for `scvi.external.DRVI`: just enough surface for `train_fit` --
+    `setup_anndata` (staticmethod), construction, `train`, `save`,
+    `get_latent_representation`, `set_latent_dimension_stats` -- with every call
+    recorded so the test can assert on the orchestration order, not just the result.
+    """
+
+    calls: list = []
+
+    def __init__(self, adata, n_latent, gene_likelihood="poisson", **kwargs):
+        _FakeDRVI.calls.append(("init", n_latent, gene_likelihood, kwargs))
+        self.n_latent = n_latent
+        self._n_obs = adata.n_obs
+
+    @staticmethod
+    def setup_anndata(adata, batch_key=None):
+        _FakeDRVI.calls.append(("setup_anndata", batch_key))
+
+    def train(self, max_epochs=None, batch_size=128, **kwargs):
+        _FakeDRVI.calls.append(("train", max_epochs, batch_size, kwargs))
+
+    def save(self, path, overwrite=True):
+        from pathlib import Path
+
+        _FakeDRVI.calls.append(("save", path, overwrite))
+        Path(path).mkdir(parents=True, exist_ok=True)
+        (Path(path) / "model.pt").write_bytes(b"fake")
+
+    def get_latent_representation(self, adata=None, indices=None, batch_size=128):
+        return np.zeros((self._n_obs, self.n_latent), dtype=np.float32)
+
+    def set_latent_dimension_stats(
+        self, embed, adata=None, datamodule=None, vanished_threshold=0.5
+    ):
+        embed.var["vanished"] = False
+
+
+class TestTrainFit:
+    """`train_fit` trains, saves the checkpoint, and writes the canonical result h5ad in
+    one call -- the counterpart to `load_fit` for the case where training happens here.
+    Verified against a fake `scvi`/`scvi.external.DRVI` (injected via `sys.modules`,
+    same technique `test_import_surface.py` uses to fake heavy modules), so the
+    orchestration is checked without needing a real GPU/scvi-tools install.
+    """
+
+    def test_trains_saves_and_writes_the_result(self, tmp_path, monkeypatch):
+        import sys
+        import types
+
+        ad = pytest.importorskip("anndata")
+        import pandas as pd
+
+        _FakeDRVI.calls = []
+        fake_external = types.ModuleType("scvi.external")
+        fake_external.DRVI = _FakeDRVI
+        fake_scvi = types.ModuleType("scvi")
+        fake_scvi.external = fake_external
+        fake_scvi.settings = types.SimpleNamespace(seed=None)
+        monkeypatch.setitem(sys.modules, "scvi", fake_scvi)
+        monkeypatch.setitem(sys.modules, "scvi.external", fake_external)
+
+        from scads_drvi.factorize.model import train_fit
+
+        obs = pd.DataFrame({"batch": ["a", "b", "a"]}, index=["c0", "c1", "c2"])
+        adata = ad.AnnData(X=np.zeros((3, 5), dtype=np.float32), obs=obs)
+
+        embed = train_fit(
+            adata,
+            n_latent=4,
+            result_path=tmp_path / "result.h5ad",
+            model_dir=tmp_path / "model",
+            batch_key="batch",
+            obs_columns=["batch"],
+            max_epochs=2,
+            seed=7,
+        )
+
+        # trained (with the seed set first) and registered before construction
+        assert fake_scvi.settings.seed == 7
+        assert _FakeDRVI.calls[0] == ("setup_anndata", "batch")
+        assert _FakeDRVI.calls[1][0] == "init"
+        assert _FakeDRVI.calls[2][0] == "train"
+        assert _FakeDRVI.calls[3][0] == "save"
+
+        # checkpoint saved
+        assert (tmp_path / "model" / "model.pt").exists()
+
+        # canonical result written and returned, matching what's on disk
+        assert embed.shape == (3, 4)
+        assert list(embed.obs.columns) == ["batch"]
+        assert embed.uns["provenance"]["n_latent"] == 4
+        assert embed.uns["provenance"]["batch_key"] == "batch"
+        assert embed.uns["provenance"]["seed"] == 7
+        back = ad.read_h5ad(tmp_path / "result.h5ad")
+        assert back.uns["provenance"] == embed.uns["provenance"]
+
+
 class TestCompilePrefix:
     def test_detects_a_clean_checkpoint(self, tmp_path):
         write_checkpoint(tmp_path / "model" / "model.pt", prefixed=False)

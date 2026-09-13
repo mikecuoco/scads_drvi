@@ -146,7 +146,7 @@ def cs_from_z(
     """``cs_i = sum_k L_ik * max(0, z_k)`` -- the interpretation notebooks' score.
 
     `loadings` is cells x factors -- for a directional score, pass
-    :func:`scads_drvi.io.result.directional_loadings`'s output. Only the factors present
+    :func:`scads_drvi.factorize.result.directional_loadings`'s output. Only the factors present
     in `results` are used, in the order `results` gives them; when `results` carries a
     ``direction`` column, filter it to one direction before calling this (e.g.
     ``results.query("direction == 'pos'")``) so the weights line up with a `loadings`

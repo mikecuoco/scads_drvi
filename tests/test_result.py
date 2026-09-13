@@ -1,5 +1,6 @@
-"""io.result: build_embed / write_result / read_result / attach_enrich_results /
-directional_loadings -- the single per-fit object that replaces Project + load_interpretation.
+"""factorize.result: build_embed / write_result / attach_enrich_results /
+directional_loadings -- the single per-fit object that replaces Project +
+load_interpretation.
 """
 
 from __future__ import annotations
@@ -10,12 +11,11 @@ import pytest
 
 ad = pytest.importorskip("anndata")
 
-from scads_drvi.io.result import (  # noqa: E402
+from scads_drvi.factorize.result import (  # noqa: E402
     attach_enrich_results,
     build_embed,
     directional_loadings,
     read_feature_loadings,
-    read_result,
     write_result,
 )
 
@@ -75,24 +75,20 @@ class TestBuildEmbed:
         assert "vanished" in embed.var.columns
         assert bool(embed.var["vanished"].all())
 
-    def test_umap_is_reindexed_to_obs_order(self, adata, z):
-        umap = pd.DataFrame(
-            {"x": [1.0, 2.0, 3.0], "y": [4.0, 5.0, 6.0]}, index=["c2", "c0", "c1"]
-        )
-        embed = build_embed(FakeModel(z), adata, umap=umap)
-        np.testing.assert_allclose(embed.obsm["X_umap"][0], [2.0, 5.0])  # c0's row
-
-    def test_umap_missing_a_cell_is_refused(self, adata, z):
-        umap = pd.DataFrame({"x": [1.0, 2.0], "y": [4.0, 5.0]}, index=["c0", "c1"])
-        with pytest.raises(ValueError, match="have no UMAP"):
-            build_embed(FakeModel(z), adata, umap=umap)
+    def test_umap_is_set_directly_from_embed_x(self, adata, z):
+        """No read/reindex function for this -- a UMAP computed from `embed.X` is
+        aligned by construction, so it's just set on the object once computed."""
+        embed = build_embed(FakeModel(z), adata)
+        coords = np.asarray(embed.X[:, :2])  # stand-in for a real reducer's output
+        embed.obsm["X_umap"] = coords
+        assert embed.obsm["X_umap"].shape == (3, 2)
 
 
-class TestWriteReadResult:
+class TestWriteResult:
     def test_round_trips(self, tmp_path, adata, z):
         embed = build_embed(FakeModel(z), adata, obs_columns=["group"])
         path = write_result(tmp_path / "result.h5ad", embed, provenance={"n_latent": 4})
-        back = read_result(path)
+        back = ad.read_h5ad(path)
         assert back.shape == embed.shape
         assert back.uns["provenance"]["n_latent"] == 4
         assert "written_at" in back.uns["provenance"]
@@ -101,16 +97,28 @@ class TestWriteReadResult:
         embed = build_embed(FakeModel(z), adata)
         peaks = pd.DataFrame(
             np.arange(8, dtype=np.float32).reshape(2, 4),
-            index=["peakA", "peakB"],
+            index=["chr1:100-200", "chr2:300-400"],
             columns=embed.var_names,
         )
         path = write_result(
             tmp_path / "result.h5ad", embed, provenance={}, feature_loadings=peaks
         )
-        back = read_result(path)
+        back = ad.read_h5ad(path)
         loadings = read_feature_loadings(path, embed=back)
-        assert list(loadings.obs_names) == ["peakA", "peakB"]
+        assert list(loadings.obs_names) == ["chr1:100-200", "chr2:300-400"]
         assert list(loadings.var_names) == list(embed.var_names)
+
+    def test_non_canonical_peak_name_is_refused(self, tmp_path, adata, z):
+        embed = build_embed(FakeModel(z), adata)
+        peaks = pd.DataFrame(
+            np.zeros((2, 4), dtype=np.float32),
+            index=["chr1_100_200", "chr2:300-400"],  # first is the old underscore form
+            columns=embed.var_names,
+        )
+        with pytest.raises(ValueError, match="non-canonical peak name"):
+            write_result(
+                tmp_path / "result.h5ad", embed, provenance={}, feature_loadings=peaks
+            )
 
     def test_no_feature_loadings_is_named(self, tmp_path, adata, z):
         path = write_result(tmp_path / "result.h5ad", build_embed(FakeModel(z), adata), provenance={})

@@ -19,19 +19,18 @@ caller-supplied. Two tests enforce that rather than trusting it:
 
 ## What's in it
 
-A fit's results live in **one `AnnData`** (see `io.result`), shaped exactly the way
-DRVI's own interpretability functions expect it: `obs` = cells, `var` = one row per
+A fit's results live in **one `AnnData`** (see `factorize.result`), shaped exactly the
+way DRVI's own interpretability functions expect it: `obs` = cells, `var` = one row per
 latent dimension. There is no separate path-configuration object — every function takes
-an explicit path.
+an explicit path, and a bare read is just `anndata.read_h5ad(path)`.
 
 | module | role |
 |---|---|
-| `io.result` | `build_embed`, `write_result`, `read_result`, `attach_enrich_results`, `directional_loadings` |
+| `factorize.model` | load or **train** a fit, latent in requested row order, split responsibility, torchrun/multi-GPU plumbing |
+| `factorize.result` | `build_embed`, `write_result`, `attach_enrich_results`, `directional_loadings` |
+| `factorize.h5ad` | backed-CSR reads, cell gating by depth |
 | `stats` | one-tailed p, Benjamini–Hochberg, BH-boundary z |
-| `io.artifacts` | obs decode, the loadings/embedding TSV readers |
-| `io.peaks` / `io.h5ad` | peak names, backed-h5ad reads |
-| `factorize.model` | load a fit, latent in requested row order, split responsibility |
-| `factorize.kernels` / `.multigpu` | interval kernels, torchrun plumbing |
+| `factorize.kernels` | interval kernels |
 | `enrich.binary` | the pinned Rust LDSC: resolve, verify, build safe commands |
 | `enrich.h2_output` | parse what `ldsc h2` prints |
 | `enrich.config` | enrichment config loading and factor selection |
@@ -54,11 +53,13 @@ pip install -e .
 ```
 
 ```python
-from scads_drvi.io.result import build_embed, write_result, read_result
+from scads_drvi.factorize.model import train_fit
 
-embed = build_embed(model, adata, obs_columns=["cell_type"], umap=umap_coords)
-write_result("my_fit.h5ad", embed, provenance={"n_latent": 96})
-embed = read_result("my_fit.h5ad")
+embed = train_fit(
+    adata, n_latent=96, obs_columns=["cell_type"],
+    result_path="my_fit.h5ad", model_dir="my_fit/model",
+)
+embed.obsm["X_umap"] = umap.UMAP().fit_transform(embed.X)   # set once computed, not read
 ```
 
 ```{toctree}

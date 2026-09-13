@@ -32,23 +32,13 @@ import numpy as np
 import pandas as pd
 import yaml
 
-# `log` and `normalize_peak_name` are re-exported: enrichment scripts import them here.
-# `run` used to be re-exported alongside them and was never called by anything, so it is
-# gone rather than carried forward.
+# `log` is re-exported: enrichment scripts import it here. `run` used to be re-exported
+# alongside it and was never called by anything, so it is gone rather than carried
+# forward.
 from scads_drvi._util.progress import log_out as log  # noqa: F401  (re-exported)
-from scads_drvi.io.peaks import normalize_peak_name  # noqa: F401  (re-exported)
 
 #: Environment variable naming the enrichment config, for callers with no better handle.
 CONFIG_ENV_VAR = "SCADS_DRVI_ENRICH_CONFIG"
-
-#: Contract filenames written by every factorize backend. The enrichment stage consumes
-#: exactly these two, plus the GWAS summary statistics.
-LOADINGS_TSV = "topic_loadings.tsv"
-FACTORS_TSV = "topic_factors.tsv"
-
-#: DRVI's set_latent_dimension_stats output, written by the fit's inspection stage.
-#: The `vanished` flags live here and nowhere else.
-LATENT_STATS_TSV = "latent_stats.tsv"
 
 
 # ---------------------------------------------------------------------------
@@ -250,34 +240,6 @@ def _as_bool(col: pd.Series) -> pd.Series:
     return mapped.astype(bool)
 
 
-def read_latent_stats(path: str | Path) -> pd.DataFrame:
-    """Read DRVI's latent_stats.tsv, or raise.
-
-    Raising is deliberate. Silently enriching all 32 dimensions because the
-    inspect stage was never run would waste an S-LDSC run per dead dimension
-    AND shift every surviving factor's shrunk enrichment, with nothing in the
-    output to say so. After a re-fit, `inspect_drvi.py latent` is a
-    prerequisite of this arm.
-    """
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(
-            f"{p} not found -- factor selection needs DRVI's vanished flags.\n"
-            f"They come from the fit's inspection stage (DRVI's\n"
-            f"set_latent_dimension_stats), whose output directory must resolve to\n"
-            f"{p.parent}."
-        )
-    df = pd.read_csv(p, sep="\t")
-    missing = {"dim", "vanished"} - set(df.columns)
-    if missing:
-        raise ValueError(f"{p} is missing required column(s): {sorted(missing)}")
-    df["vanished"] = _as_bool(df["vanished"])
-    for extra in ("vanished_positive_direction", "vanished_negative_direction"):
-        if extra in df.columns:
-            df[extra] = _as_bool(df[extra])
-    return df
-
-
 def select_factors(
     latent_stats: pd.DataFrame,
     dim_names: Sequence[str],
@@ -362,18 +324,18 @@ def kept_dims(fmap: pd.DataFrame) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# The result h5ad (see scads_drvi.io.result) -- current path
+# The result h5ad (see scads_drvi.factorize.result)
 # ---------------------------------------------------------------------------
 
 def latent_stats_from_embed(embed) -> pd.DataFrame:
     """``embed.var`` reshaped to the ``dim, vanished, ...`` frame :func:`select_factors`
     expects.
 
-    Replaces :func:`read_latent_stats` for a fit stored as a result h5ad: DRVI's own
-    ``model.set_latent_dimension_stats`` already wrote these columns onto ``embed.var``
-    when the object was built (:func:`scads_drvi.io.result.build_embed`), so there is no
-    file left to read -- this just gives the in-memory table the shape the rest of this
-    module was written against.
+    DRVI's own ``model.set_latent_dimension_stats`` already wrote these columns onto
+    ``embed.var`` when the object was built
+    (:func:`scads_drvi.factorize.result.build_embed`), so there is no file to read --
+    this just gives the in-memory table the shape the rest of this module was written
+    against.
     """
     frame = embed.var.reset_index(names="dim")
     frame["dim"] = frame["dim"].astype(str)
@@ -388,7 +350,7 @@ def kept_loadings(embed, fmap: pd.DataFrame):
 
     A caller that needs one direction's non-negative loadings (for S-LDSC's top-frac
     annotation ranking) derives it explicitly with
-    :func:`scads_drvi.io.result.directional_loadings` first; this function only
+    :func:`scads_drvi.factorize.result.directional_loadings` first; this function only
     subsets to the kept dimensions, in `fmap`'s order, from whatever `embed` it is given.
     """
     import pandas as pd
@@ -400,7 +362,7 @@ def kept_loadings(embed, fmap: pd.DataFrame):
 
 def kept_feature_loadings(feature_loadings, fmap: pd.DataFrame):
     """peaks x kept-dims, from the companion loadings h5ad
-    (:func:`scads_drvi.io.result.read_feature_loadings`)."""
+    (:func:`scads_drvi.factorize.result.read_feature_loadings`)."""
     import pandas as pd
 
     keep = kept_dims(fmap)
@@ -408,62 +370,6 @@ def kept_feature_loadings(feature_loadings, fmap: pd.DataFrame):
         feature_loadings[:, keep].X, index=feature_loadings.obs_names, columns=keep
     )
     return frame
-
-
-# ---------------------------------------------------------------------------
-# The factorize contract (legacy: topic_loadings.tsv / topic_factors.tsv)
-# ---------------------------------------------------------------------------
-
-def read_loadings(path: str | Path) -> pd.DataFrame:
-    """cells x K. Index = cell barcodes, columns = dim_0..dim_{K-1}."""
-    df = pd.read_csv(path, sep="\t", index_col=0)
-    df.index = df.index.astype(str)
-    return df
-
-
-def read_factors(path: str | Path) -> pd.DataFrame:
-    """features x K, index canonicalised to chr:start-end.
-
-    topic_factors.tsv has an empty leading header cell; index_col=0 handles it.
-    Peak names are normalised through the shared normalize_peak_name() so the
-    underscore and dash spellings behave, and anything unparseable is dropped
-    loudly rather than silently becoming an annotation with no coordinates.
-    """
-    df = pd.read_csv(path, sep="\t", index_col=0)
-    raw = df.index.astype(str)
-    norm = [normalize_peak_name(v) for v in raw]
-    bad = [r for r, n in zip(raw, norm, strict=True) if n is None]
-    if bad:
-        log(f"WARNING: dropping {len(bad):,} unparseable feature name(s), e.g. {bad[:3]}")
-    keep = [n is not None for n in norm]
-    df = df.loc[keep]
-    df.index = pd.Index([n for n in norm if n is not None], name="peak")
-    if df.index.has_duplicates:
-        dup = df.index[df.index.duplicated()].unique().tolist()
-        raise ValueError(f"duplicate feature names after normalisation: {dup[:5]}")
-    return df
-
-
-def load_contract(
-    drvi_dir: str | Path,
-    fmap: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Read loadings + factors and subset BOTH to the kept dims, from one map.
-
-    Subsetting from the same list is the point: doing it independently is how
-    the two matrices drift out of alignment, and nothing downstream would
-    reveal it -- the shapes would still agree.
-    """
-    drvi_dir = Path(drvi_dir)
-    loadings = read_loadings(drvi_dir / LOADINGS_TSV)
-    factors = read_factors(drvi_dir / FACTORS_TSV)
-    if list(loadings.columns) != list(factors.columns):
-        raise ValueError(
-            "loadings and factors disagree on dimension columns: "
-            f"{list(loadings.columns)[:5]}... vs {list(factors.columns)[:5]}..."
-        )
-    keep = kept_dims(fmap)
-    return loadings[keep], factors[keep]
 
 
 #: annot params that, if changed, invalidate every LD score downstream. Maps the key as

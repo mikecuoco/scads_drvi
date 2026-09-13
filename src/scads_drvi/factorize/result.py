@@ -18,13 +18,30 @@ always a computation, never a file.
 
 Peak-level ("feature") loadings are the one thing that does not fit this shape --
 ``obs`` = peaks would collide with ``obs`` = cells on the same object -- so they live in
-a small companion file, linked by path from ``uns["provenance"]``.
+a small companion file, linked by path from ``uns["provenance"]``. Peak names are
+validated against the canonical ``chr:start-end`` form when that companion is written --
+there is no separate peak-name-normalizing module here, because renaming happens once,
+at the point a fit is saved, not on every later read.
+
+**This module does not wrap plain ``anndata`` reads.** A bare read is just
+``anndata.read_h5ad(path)`` (or ``backed="r"``/``backed=True`` for a large object) --
+call it directly rather than through a passthrough here. Likewise, a derived obs column
+(a ratio, a log, a bucketed value) is a line of pandas at the call site, not a named
+helper::
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        adata.obs["frac"] = np.where(denom > 0, num / denom, np.nan)
+
+computed however the caller's data actually needs it -- the ``errstate`` guard silences
+the expected warning from dividing where `denom` is zero, since the ``where`` already
+routes those entries to ``nan`` rather than using the division's result.
 """
 
 from __future__ import annotations
 
 import contextlib
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -38,11 +55,15 @@ if TYPE_CHECKING:  # pragma: no cover
 __all__ = [
     "build_embed",
     "write_result",
-    "read_result",
     "read_feature_loadings",
     "attach_enrich_results",
     "directional_loadings",
 ]
+
+#: The canonical peak-name form every feature-loadings index must already be in by the
+#: time it reaches `write_result` -- enforced here, once, at fit-save time, rather than
+#: normalized defensively wherever a peak name is later read.
+_PEAK_RE = re.compile(r"^chr[\w.]+:\d+-\d+$")
 
 
 def _version() -> str:
@@ -59,9 +80,8 @@ def _atomic_write_h5ad(path: str | Path, adata: AnnData) -> None:
     success.
 
     A fit can take hours to produce and an enrichment arm's results can take longer
-    still; a half-written h5ad after either is worse than none. Local rather than
-    imported for the same reason ``io/meta.py`` used to keep this itself: this guarantee
-    is small enough to own outright and owning it keeps the module free of any
+    still; a half-written h5ad after either is worse than none. This guarantee is small
+    enough to own outright, kept local rather than imported so the module carries no
     dependency on where a deployment puts scratch space.
     """
     path = Path(path)
@@ -79,19 +99,27 @@ def build_embed(
     adata,
     *,
     obs_columns: Sequence[str] | None = None,
-    umap: pd.DataFrame | None = None,
     vanished_threshold: float = 0.5,
 ) -> AnnData:
     """The canonical cells x K object for one fit, in DRVI's own ``embed`` shape.
 
     `obs_columns` is an explicit list of columns to carry over from `adata.obs` --
     deliberately not "every column", since the raw obs h5ad routinely carries far more
-    than any one fit's downstream consumers need. `umap`, if given, is a cells x 2 frame
-    (see :func:`scads_drvi.io.artifacts.read_umap`) written to ``obsm["X_umap"]``, which
-    is what ``drvi.utils.pl.plot_latent_dims_in_umap`` requires.
+    than any one fit's downstream consumers need.
 
     `var` is populated by DRVI's own ``model.set_latent_dimension_stats`` -- this
     function does not reimplement vanished-dimension detection, ordering or titling.
+
+    A UMAP (or any other 2-D embedding) is set directly on the object once computed,
+    not passed in here::
+
+        embed = build_embed(model, adata, obs_columns=["cell_type"])
+        embed.obsm["X_umap"] = umap.UMAP(...).fit_transform(embed.X)
+        write_result(path, embed, provenance={...})
+
+    Setting it straight from `embed.X` is trivially aligned by construction -- there is
+    nothing to reindex or validate, unlike an embedding computed elsewhere and read back
+    from a file.
     """
     import anndata as ad
     import numpy as np
@@ -105,16 +133,6 @@ def build_embed(
     embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
 
     model.set_latent_dimension_stats(embed, vanished_threshold=vanished_threshold)
-
-    if umap is not None:
-        coords = umap.reindex(embed.obs_names)
-        if coords.isna().any().any():
-            missing = int(coords.isna().any(axis=1).sum())
-            raise ValueError(
-                f"{missing} of {embed.n_obs} cells have no UMAP coordinates; `umap` must "
-                f"cover every cell in `adata`."
-            )
-        embed.obsm["X_umap"] = coords.to_numpy(dtype=np.float32)
 
     return embed
 
@@ -136,6 +154,12 @@ def write_result(
     ``<path stem>.loadings.h5ad`` beside `path`) is recorded into
     ``provenance["feature_loadings_path"]`` before the primary write, so
     :func:`read_feature_loadings` can find it later.
+
+    Every entry of `feature_loadings`'s index must already be a canonical
+    ``chr:start-end`` peak name -- this is the one place that contract is enforced, so
+    nothing downstream needs to normalize a peak name again. A name that doesn't match
+    raises, naming the first few offenders, rather than silently writing an annotation
+    with no coordinates.
     """
     path = Path(path)
     prov = dict(provenance)
@@ -143,6 +167,13 @@ def write_result(
     prov.setdefault("scads_drvi_version", _version())
 
     if feature_loadings is not None:
+        bad = [n for n in feature_loadings.index.astype(str) if not _PEAK_RE.match(n)]
+        if bad:
+            raise ValueError(
+                f"feature_loadings has {len(bad)} non-canonical peak name(s), e.g. "
+                f"{bad[:5]}. Peak names must already be chr:start-end by the time a fit "
+                f"is saved -- rename them before calling write_result, not after."
+            )
         companion = (
             Path(feature_loadings_path)
             if feature_loadings_path is not None
@@ -171,25 +202,15 @@ def _write_feature_loadings(path: Path, frame: pd.DataFrame) -> None:
     _atomic_write_h5ad(path, adata)
 
 
-def read_result(path: str | Path, *, backed: str | bool | None = None) -> AnnData:
-    """Read a result h5ad. The one blessed import path for it, so a future storage
-    change has one call site to edit rather than a `ad.read_h5ad` scattered through
-    every caller.
-    """
-    import anndata as ad
-
-    return ad.read_h5ad(Path(path), backed=backed)
-
-
 def read_feature_loadings(
     path: str | Path, *, embed: AnnData | None = None, backed: str | bool | None = None
 ) -> AnnData:
     """Read the companion peaks x K loadings file for the result at `path`.
 
     Its location is resolved from ``uns["provenance"]["feature_loadings_path"]``. Pass
-    the already-loaded `embed` (from :func:`read_result`) to avoid a second open of the
-    primary file just to read that one field -- ``uns`` is always loaded eagerly, even
-    under ``backed=True``.
+    the already-loaded `embed` (from ``anndata.read_h5ad(path)``) to avoid a second open
+    of the primary file just to read that one field -- ``uns`` is always loaded eagerly,
+    even under ``backed=True``.
     """
     import anndata as ad
 
@@ -227,10 +248,8 @@ def attach_enrich_results(
 
     `results` is the tidy per-trait table :func:`scads_drvi.enrich.ldsc.read_results`
     builds: columns ``dim``, ``direction`` (``"pos"``/``"neg"``/``"combined"``),
-    ``trait``, the raw LDSC columns, and the derived ``p``/``q``. This is what replaces
-    the old split contract's ``half_map.tsv`` and its three-name label system -- a caller
-    filters ``results.query("direction == 'pos' and trait == 'X'")`` instead of resolving
-    a `k7` -> `dim_47/pos` alias.
+    ``trait``, the raw LDSC columns, and the derived ``p``/``q``. A caller filters
+    ``results.query("direction == 'pos' and trait == 'X'")`` to get one arm's view.
 
     `factor_selection`, if given, is :func:`scads_drvi.enrich.config.select_factors`'s
     output with its ``annot_index`` column dropped -- that numbering is a purely internal

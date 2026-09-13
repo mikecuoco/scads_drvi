@@ -6,7 +6,7 @@ covariate, how factors correlate with one another, and how groups load onto them
 Two figures this module used to draw are now DRVI's own, and are not reimplemented here:
 per-dimension summary statistics (``drvi.utils.pl.plot_latent_dimension_stats``, driven
 by the ``var`` columns ``model.set_latent_dimension_stats`` writes -- see
-:func:`scads_drvi.io.result.build_embed`) and a factor-value-by-category heatmap
+:func:`scads_drvi.factorize.result.build_embed`) and a factor-value-by-category heatmap
 (``drvi.utils.pl.plot_latent_dims_in_heatmap``). Call those directly and layer
 :func:`scads_drvi.pl.style.apply_style`/:func:`scads_drvi.pl.save.save_figure` on the
 figure they return, the same as any other figure in this package.

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Backed-h5ad readers: scattered CSR row gathers, shape, and var names.
 
-No torch at module scope, deliberately: a CPU env must be able to import this. The obs
-decode lives in :mod:`scads_drvi.io.artifacts` and only there -- a second copy here got
-the missing-categorical case wrong for as long as it existed.
+No torch at module scope, deliberately: a CPU env must be able to import this. Obs
+access goes through ``anndata`` itself (:func:`keep_rows` reads its depth column via a
+backed ``anndata.read_h5ad``, not a hand-rolled decoder) -- the CSR-gathering code below
+is the genuinely custom part, a deliberate performance optimization for scattered-row
+reads on a huge sparse matrix that anndata's own backed-mode indexing does not do
+efficiently.
 """
 from __future__ import annotations
 
@@ -118,25 +121,20 @@ def h5ad_var_names(path: str):
     return np.array([x.decode() if isinstance(x, bytes) else x for x in v])
 
 
-
 def keep_rows(adata_path: str, min_fragment: int, depth_col: str = "n_fragment"):
     """Absolute row indices a gated run may touch."""
     n_obs, _ = h5ad_shape(adata_path)
     if not min_fragment:
         return np.arange(n_obs), None
-    # io.artifacts.read_obs, not a second decoder here. The copy this replaced indexed
-    # the category table with the raw codes, and anndata writes a MISSING categorical as
-    # code -1 -- which indexes the LAST category, so every unlabelled cell came back
-    # carrying the final category's name instead of NaN.
-    from scads_drvi.io.artifacts import read_obs
+
+    import anndata as ad
 
     try:
-        frame = read_obs(adata_path, [depth_col])
+        d = ad.read_h5ad(adata_path, backed="r").obs[depth_col].to_numpy(dtype=np.int64)
     except KeyError as exc:
         raise SystemExit(
             f"min_fragment needs obs['{depth_col}'], which is absent"
         ) from exc
-    d = frame[depth_col].to_numpy(dtype=np.int64)
     rows = np.flatnonzero(d >= min_fragment)
     info = {"min_fragment": int(min_fragment), "depth_col": depth_col,
             "n_cells_available": int(n_obs), "n_cells_kept": int(rows.size),

@@ -20,19 +20,18 @@ caller-supplied. Two tests enforce that rather than trusting it:
 
 ## What's in it
 
-A fit's results live in **one `AnnData`** (`io.result`), shaped exactly the way DRVI's
-own interpretability functions expect it: `obs` = cells, `var` = one row per latent
-dimension. There is no path-configuration object — every function takes an explicit
-path.
+A fit's results live in **one `AnnData`** (`factorize.result`), shaped exactly the way
+DRVI's own interpretability functions expect it: `obs` = cells, `var` = one row per
+latent dimension. There is no path-configuration object — every function takes an
+explicit path, and a bare read is just `anndata.read_h5ad(path)`.
 
 | module | role |
 |---|---|
-| `io.result` | `build_embed`, `write_result`, `read_result`, `attach_enrich_results`, `directional_loadings` |
+| `factorize.model` | load or **train** a fit, latent in requested row order, split responsibility |
+| `factorize.result` | `build_embed`, `write_result`, `attach_enrich_results`, `directional_loadings` |
+| `factorize.h5ad` | backed-CSR reads, cell gating by depth |
 | `stats` | one-tailed p, Benjamini–Hochberg, BH-boundary z |
-| `io.artifacts` | obs decode, the loadings/embedding TSV readers |
-| `io.peaks` / `io.h5ad` | peak names, backed-h5ad reads |
-| `factorize.model` | load a fit, latent in requested row order, split responsibility |
-| `factorize.kernels` / `.multigpu` | interval kernels, torchrun plumbing |
+| `factorize.kernels` | interval kernels |
 | `enrich.binary` | the pinned Rust LDSC: resolve, verify, build safe commands |
 | `enrich.h2_output` | parse what `ldsc h2` prints |
 | `enrich.config` | enrichment config loading and factor selection |
@@ -74,23 +73,28 @@ pip install -e 'git+https://github.com/mikecuoco/scads_drvi@main#egg=scads-drvi'
 ## Getting started
 
 Every function takes an explicit path. A fit's results are one `AnnData`, built once and
-read back everywhere else:
+read back everywhere else with `anndata.read_h5ad` directly:
 
 ```python
-from scads_drvi.io.result import build_embed, write_result, read_result
+from scads_drvi.factorize.model import train_fit
 
-embed = build_embed(model, adata, obs_columns=["cell_type"], umap=umap_coords)
-write_result("my_fit.h5ad", embed, provenance={"n_latent": 96, "batch_key": "donor"})
-
-embed = read_result("my_fit.h5ad")
+embed = train_fit(
+    adata, n_latent=96, batch_key="donor", obs_columns=["cell_type"],
+    result_path="my_fit.h5ad", model_dir="my_fit/model",
+)
+embed.obsm["X_umap"] = umap.UMAP().fit_transform(embed.X)   # set once computed, not read
 embed.var["vanished"]      # DRVI's own per-dimension flag
 ```
+
+`train_fit` trains, saves the checkpoint, and writes the result h5ad in one call. Given
+a checkpoint from elsewhere (e.g. a multi-GPU `torchrun` job), `factorize.model.load_fit`
+and `factorize.result.build_embed`/`write_result` do the same, split across two calls.
 
 ## Reading a finished run
 
 ```python
 from scads_drvi.enrich.ldsc import read_results
-from scads_drvi.io.result import attach_enrich_results, directional_loadings
+from scads_drvi.factorize.result import attach_enrich_results, directional_loadings
 from scads_drvi.scores.cell import cs_from_z
 
 results = read_results(arm / "results", traits=["t1", "t2"], annot2dim=annot2dim)
@@ -123,11 +127,10 @@ lazily. Heavy dependencies are confined by directory:
 
 | module | needs |
 |---|---|
-| `factorize/model.py`, `factorize/multigpu.py` | `torch`, `scvi-tools` (function-local) |
-| `io/result.py` | `anndata` (function-local) |
+| `factorize/model.py` | `torch`, `scvi-tools` (function-local; also carries torchrun/multi-GPU plumbing) |
+| `factorize/result.py` | `anndata` (function-local) |
 | `pl/` | `matplotlib`, `seaborn` (function-local) |
-| `io/h5ad.py` | `h5py` at module scope — it *is* the h5ad reader |
-| `io/artifacts.py` | `h5py`, function-local, so it imports without one |
+| `factorize/h5ad.py` | `h5py` at module scope — it *is* the h5ad reader |
 | everything else | numpy / pandas / scipy / pyyaml |
 
 This is not cosmetic. The environment that runs the enrichment stages has no torch, no

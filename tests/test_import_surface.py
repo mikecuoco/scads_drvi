@@ -1,11 +1,12 @@
 """Heavy dependencies stay where they are declared to be.
 
-``torch``/``scvi-tools``/``drvi`` belong to :mod:`scads_drvi.factorize.model` and
-:mod:`scads_drvi.io.result`, ``matplotlib``/``seaborn`` to :mod:`scads_drvi.pl`, and
-``h5py``/``anndata`` are function-local wherever a module needs them. Everything else
-must import in an environment that has none of them -- which is not hypothetical: the
-environment that runs the enrichment stages has no torch, no scvi, no drvi, no
-matplotlib, no seaborn, no h5py and no anndata.
+``torch``/``scvi-tools``/``drvi`` belong to :mod:`scads_drvi.factorize.model` (and its
+one caller-facing exception, :mod:`scads_drvi.factorize.result`, stays core -- see
+below), ``matplotlib``/``seaborn`` to :mod:`scads_drvi.pl`, and ``h5py``/``anndata`` are
+function-local wherever a module needs them. Everything else must import in an
+environment that has none of them -- which is not hypothetical: the environment that
+runs the enrichment stages has no torch, no scvi, no drvi, no matplotlib, no seaborn, no
+h5py and no anndata.
 
 The check runs in a subprocess with a meta-path finder blocking those modules, because
 by the time this test module is imported they may already be in ``sys.modules``.
@@ -31,9 +32,7 @@ CORE_MODULES = [
     "scads_drvi.stats",
     "scads_drvi.scores.cell",
     "scads_drvi.scores.aggregate",
-    "scads_drvi.io.artifacts",
-    "scads_drvi.io.result",
-    "scads_drvi.io.peaks",
+    "scads_drvi.factorize.result",
     "scads_drvi.enrich.ldsc",
     "scads_drvi.enrich.h2_output",
     "scads_drvi.enrich.annotations",
@@ -45,11 +44,19 @@ CORE_MODULES = [
 # Deliberately absent, each for a reason rather than an oversight. Listed so that adding
 # a module here is a decision someone made, not a gap nobody noticed:
 #
-#   scads_drvi.io.h5ad        module-scope h5py -- it exists to read backed h5ad files
-#   scads_drvi.factorize.*    torch / scvi-tools / drvi
-#   scads_drvi.pl.*           matplotlib / seaborn
-#   scads_drvi.enrich.config  module-scope numpy, pandas and yaml
-#   scads_drvi._util.presets  argparse CLI plumbing, not part of the library surface
+#   scads_drvi.factorize.h5ad     module-scope h5py -- it exists to read backed h5ad files
+#   scads_drvi.factorize.model    torch / scvi-tools / drvi -- also carries the
+#                                 torchrun/multi-GPU plumbing (Ranks and friends),
+#                                 meaningless without torch regardless
+#   scads_drvi.factorize.kernels  conceptually part of the model-training surface,
+#                                 same as .model, even though it is numpy-only itself
+#   scads_drvi.pl.*               matplotlib / seaborn
+#   scads_drvi.enrich.config      module-scope numpy, pandas and yaml
+#   scads_drvi._util.presets      argparse CLI plumbing, not part of the library surface
+#
+# scads_drvi.factorize.result is the one factorize submodule that DOES belong above:
+# anndata/numpy/pandas are function-local throughout it, exactly like io.result was
+# before this package folded into factorize.
 
 BLOCKED = ("torch", "scvi", "drvi", "matplotlib", "seaborn", "h5py", "anndata")
 

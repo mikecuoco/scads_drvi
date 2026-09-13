@@ -20,7 +20,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-h5py = pytest.importorskip("h5py")
 ad = pytest.importorskip("anndata")
 matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
@@ -33,12 +32,10 @@ from scads_drvi.enrich.config import (  # noqa: E402
     select_factors,
 )
 from scads_drvi.enrich.ldsc import read_results  # noqa: E402
-from scads_drvi.io.artifacts import cell_metadata  # noqa: E402
-from scads_drvi.io.result import (  # noqa: E402
+from scads_drvi.factorize.result import (  # noqa: E402
     attach_enrich_results,
     build_embed,
     directional_loadings,
-    read_result,
     write_result,
 )
 from scads_drvi.pl.enrichment import (  # noqa: E402
@@ -110,74 +107,62 @@ def analysis(tmp_path_factory):
     fine = [t for lineage in LINEAGES for t in FINE_TYPES[lineage]]
     lineage_of = {t: lin for lin in LINEAGES for t in FINE_TYPES[lin]}
 
-    cell_ids = np.array(
-        [f"plate{i % 5}:bc{i:05d}".encode() for i in range(N_CELLS)]
-    )
-    fine_codes = rng.integers(0, len(fine), size=N_CELLS).astype(np.int32)
-    tissue_codes = rng.integers(0, len(TISSUES), size=N_CELLS).astype(np.int32)
-    cultivar_codes = rng.integers(0, len(CULTIVARS), size=N_CELLS).astype(np.int32)
+    cell_ids = [f"plate{i % 5}:bc{i:05d}" for i in range(N_CELLS)]
+    fine_vals = rng.choice(fine, size=N_CELLS)
+    tissue_vals = rng.choice(TISSUES, size=N_CELLS)
+    cultivar_vals = rng.choice(CULTIVARS, size=N_CELLS)
     reads = rng.integers(500, 200_000, size=N_CELLS).astype(np.int64)
     in_peaks = (reads * rng.uniform(0.2, 0.8, size=N_CELLS)).astype(np.int64)
     in_peaks[0] = 0
-    reads[0] = 0  # a cell with nothing measured, so the ratio must be NaN
+    reads[0] = 0  # a cell with nothing measured, so the derived ratio must be NaN
 
+    # A real customer's obs h5ad, written the way anndata itself writes one -- no
+    # hand-rolled h5py encoding, since there is no custom decoder left to stress-test.
+    obs_df = pd.DataFrame(
+        {
+            "fine_type": pd.Categorical(fine_vals),
+            "tissue": pd.Categorical(tissue_vals),
+            "cultivar": pd.Categorical(cultivar_vals),
+            "lineage": pd.Categorical(
+                [lineage_of[f] for f in fine_vals], categories=LINEAGES
+            ),
+            "total_reads": reads,
+            "reads_in_peaks": in_peaks,
+        },
+        index=pd.Index(cell_ids, name="cell_uid"),
+    )
     obs_path = root / "matrix.h5ad"
-    with h5py.File(obs_path, "w") as fh:
-        obs = fh.create_group("obs")
-        obs.attrs["_index"] = "cell_uid"
-        obs.attrs["encoding-type"] = "dataframe"
-        obs.create_dataset("cell_uid", data=cell_ids)
-        for name, codes, cats in (
-            ("fine_type", fine_codes, fine),
-            ("tissue", tissue_codes, TISSUES),
-            ("cultivar", cultivar_codes, CULTIVARS),
-        ):
-            group = obs.create_group(name)
-            group.create_dataset(
-                "categories", data=np.array([c.encode() for c in cats])
-            )
-            group.create_dataset("codes", data=codes)
-        obs.create_dataset("total_reads", data=reads)
-        obs.create_dataset("reads_in_peaks", data=in_peaks)
-        # lineage, so there is a coarse grouping to block a fine axis by
-        lineage_codes = np.array(
-            [LINEAGES.index(lineage_of[fine[c]]) for c in fine_codes], dtype=np.int32
-        )
-        group = obs.create_group("lineage")
-        group.create_dataset(
-            "categories", data=np.array([lin.encode() for lin in LINEAGES])
-        )
-        group.create_dataset("codes", data=lineage_codes)
+    ad.AnnData(X=np.zeros((N_CELLS, 1), dtype=np.float32), obs=obs_df).write_h5ad(obs_path)
 
     # -- build_embed: obs h5ad + a trained model -> the canonical cells x K object ----
-    obs_frame = cell_metadata(
-        obs_path,
-        columns=["fine_type", "tissue", "cultivar", "lineage", "total_reads"],
-        derived={"peak_fraction": ("reads_in_peaks", "total_reads")},
-    )
-    fake_adata = ad.AnnData(
-        X=np.zeros((N_CELLS, 1), dtype=np.float32), obs=obs_frame
-    )
+    raw = ad.read_h5ad(obs_path)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        raw.obs["peak_fraction"] = np.where(
+            raw.obs["total_reads"].to_numpy() > 0,
+            raw.obs["reads_in_peaks"].to_numpy() / raw.obs["total_reads"].to_numpy(),
+            np.nan,
+        )
     z = rng.normal(0.2, 0.6, size=(N_CELLS, N_FACTORS)).astype(np.float32)
     vanished = np.array([False] * N_KEPT + [True] * (N_FACTORS - N_KEPT))
     model = _FakeModel(z, vanished)
 
-    coords = pd.DataFrame(
-        rng.normal(size=(N_CELLS, 2)),
-        index=obs_frame.index,
-        columns=["embed_1", "embed_2"],
-    )
-
     embed = build_embed(
-        model, fake_adata, obs_columns=list(obs_frame.columns), umap=coords
+        model,
+        raw,
+        obs_columns=[
+            "fine_type", "tissue", "cultivar", "lineage", "total_reads", "peak_fraction",
+        ],
     )
+    # A UMAP is set directly from the embed once computed -- no read/reindex step.
+    embed.obsm["X_umap"] = rng.normal(size=(N_CELLS, 2)).astype(np.float32)
+
     path = root / "assembly_v3.h5ad"
     write_result(
         path, embed, provenance={"n_latent": N_FACTORS, "fit_name": "assembly_v3"}
     )
 
     # -- factor selection, exactly the way the real enrichment stage would ------------
-    embed = read_result(path)
+    embed = ad.read_h5ad(path)
     stats = latent_stats_from_embed(embed)
     fmap = select_factors(stats, list(embed.var_names))
     keep = kept_dims(fmap)
@@ -215,20 +200,22 @@ def close_figures():
 
 
 def test_obs_decodes_with_an_unfamiliar_index_and_columns(analysis):
-    frame = cell_metadata(
-        analysis["obs"],
-        columns=["fine_type", "tissue", "cultivar", "lineage", "total_reads"],
-        derived={"peak_fraction": ("reads_in_peaks", "total_reads")},
-    )
+    frame = ad.read_h5ad(analysis["obs"]).obs
     assert frame.index.name == "cell_uid"
     assert len(frame) == N_CELLS
     assert set(frame["tissue"].astype(str)) == set(TISSUES)
     # the unmeasured cell has no fraction, not a zero one
-    assert np.isnan(frame["peak_fraction"].iloc[0])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        fraction = np.where(
+            frame["total_reads"].to_numpy() > 0,
+            frame["reads_in_peaks"].to_numpy() / frame["total_reads"].to_numpy(),
+            np.nan,
+        )
+    assert np.isnan(fraction[0])
 
 
 def test_full_result_loads(analysis):
-    embed = read_result(analysis["path"])
+    embed = ad.read_h5ad(analysis["path"])
     arm = embed.uns["enrich"][ARM]
     assert int(arm["factor_selection"]["kept"].sum()) == N_KEPT
     assert set(arm["results"]["trait"]) == set(TRAITS)
@@ -239,7 +226,7 @@ def test_full_result_loads(analysis):
 
 
 def test_scores_and_aggregation_over_alien_groupings(analysis):
-    embed = read_result(analysis["path"])
+    embed = ad.read_h5ad(analysis["path"])
     arm = embed.uns["enrich"][ARM]
     keep = analysis["keep"]
 
@@ -282,7 +269,7 @@ def test_scores_and_aggregation_over_alien_groupings(analysis):
 
 
 def test_every_figure_draws_and_saves(analysis, tmp_path):
-    embed = read_result(analysis["path"])
+    embed = ad.read_h5ad(analysis["path"])
     arm = embed.uns["enrich"][ARM]
     keep = analysis["keep"]
 
