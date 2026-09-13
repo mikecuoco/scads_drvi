@@ -1,0 +1,64 @@
+name: docs
+
+on:
+  push:
+    branches: [worktree-refactor-api]
+  workflow_dispatch:
+
+# GitHub Pages deploys need these; the docs build itself needs only `contents: read`.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time; let an in-flight one finish rather than
+# cancel it, so a page never serves a half-replaced build.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Same convention as tests.yml: install the doc-building stack and the package's
+      # OWN dependencies explicitly, then `--no-deps` so pyproject's torch/scvi-tools/
+      # drvi-py (needed by factorize/ and io.result at runtime, not by Sphinx) are never
+      # pulled in here. autodoc_mock_imports in conf.py covers every module that would
+      # otherwise need them at import time.
+      - name: Install documentation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy pandas scipy pyyaml
+          python -m pip install "sphinx>=7.3" "sphinx-book-theme>=1.1" \
+            "sphinx-autodoc-typehints>=2.2" "sphinx-copybutton>=0.5" \
+            "myst-nb>=1.1" "jupytext>=1.16"
+          python -m pip install --no-deps -e .
+
+      # nb_execution_mode=off: the tutorial notebooks are committed pre-executed (three
+      # with real outputs, one with cleared outputs since it needs torch, which this job
+      # does not install) and are rendered as-is rather than re-run here.
+      - name: Build Sphinx site
+        run: sphinx-build -b html -W --keep-going -D nb_execution_mode=off docs docs/_build/html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/_build/html
+
+  deploy:
+    name: deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment
