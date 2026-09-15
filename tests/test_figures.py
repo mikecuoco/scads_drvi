@@ -1,4 +1,4 @@
-"""viz.enrichment / viz.umap / viz.factors -- figures come back, nothing is written."""
+"""pl.enrichment / pl.umap / pl.factors -- figures come back, nothing is written."""
 
 from __future__ import annotations
 
@@ -10,7 +10,11 @@ matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.colors import to_hex  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
+
+ad = pytest.importorskip("anndata")
+pytest.importorskip("scanpy")
 
 from scads_drvi.pl.enrichment import (  # noqa: E402
     covariate_audit,
@@ -23,15 +27,12 @@ from scads_drvi.pl.factors import (  # noqa: E402
     covariate_association,
     factor_correlation,
     factor_distributions,
+    latent_dimension_stats,
+    latent_heatmap,
+    latent_heatmap_with_heritability,
 )
 from scads_drvi.pl.frugal import box_stats, box_stats_by_column  # noqa: E402
-from scads_drvi.pl.umap import (  # noqa: E402
-    bare,
-    point_style,
-    subsample,
-    umap_categorical,
-    umap_continuous,
-)
+from scads_drvi.pl.umap import latent_umap_grid, subsample  # noqa: E402
 from scads_drvi.stats import add_fdr  # noqa: E402
 
 
@@ -89,21 +90,32 @@ def cells():
     )
 
 
-class TestPointStyle:
-    @pytest.mark.parametrize("n", [1, 100, 5_000, 60_000, 300_000, 1_300_000])
-    def test_always_rasterised_and_sized(self, n):
-        style = point_style(n)
-        assert style["rasterized"] is True
-        assert style["s"] > 0
-
-    def test_size_falls_as_the_count_rises(self):
-        """The 50x gap between two call sites was a point-count artefact, not a choice."""
-        sizes = [point_style(n)["s"] for n in (1_000, 50_000, 1_300_000)]
-        assert sizes[0] > sizes[1] > sizes[2]
-
-    def test_zero_is_refused(self):
-        with pytest.raises(ValueError, match="positive"):
-            point_style(0)
+@pytest.fixture
+def embed():
+    """A small ``embed``-shaped ``AnnData``: obs = cells, var = one row per dim,
+    obsm["X_umap"] = an embedding -- the object every :mod:`scads_drvi.pl.umap` figure
+    now takes directly.
+    """
+    rng = np.random.default_rng(2)
+    n, k = 2000, 6
+    obs = pd.DataFrame(
+        {
+            "grouping": rng.choice(list("abcde"), size=n),
+            "cs": rng.gamma(2.0, 1.0, size=n),
+        },
+        index=[f"c{i}" for i in range(n)],
+    )
+    var = pd.DataFrame(
+        {
+            "order": np.arange(k),
+            "vanished": [False] * (k - 2) + [True] * 2,
+            "title": [f"DR {i + 1}" for i in range(k)],
+        },
+        index=[f"dim_{i}" for i in range(k)],
+    )
+    e = ad.AnnData(X=rng.normal(size=(n, k)).astype(np.float32), obs=obs, var=var)
+    e.obsm["X_umap"] = rng.normal(size=(n, 2)).astype(np.float32)
+    return e
 
 
 class TestSubsample:
@@ -128,47 +140,38 @@ class TestSubsample:
             subsample(cells, 0)
 
 
-class TestUmapPanels:
-    def test_categorical_returns_fig_and_ax(self, cells):
-        fig, ax = umap_categorical(cells, "grouping", n=1000)
-        assert isinstance(fig, Figure)
-        assert ax.get_legend() is not None
+class TestLatentUmapGrid:
+    def test_returns_one_panel_per_kept_dim(self, embed):
+        fig = latent_umap_grid(embed, n=500)
+        n_kept = int((~embed.var["vanished"]).sum())
+        # each panel is (scatter axis, colorbar axis)
+        assert len(fig.axes) == 2 * n_kept
 
-    def test_categorical_colours_are_stable_across_subsamples(self, cells):
-        """Building the palette from a sampled frame is how one category gets two."""
-        from scads_drvi.pl.color import categorical_palette
+    def test_directional_doubles_the_panel_count(self, embed):
+        fig = latent_umap_grid(embed, directional=True, n=500)
+        n_kept = int((~embed.var["vanished"]).sum())
+        assert len(fig.axes) == 2 * (2 * n_kept)
 
-        palette = categorical_palette(sorted(cells["grouping"].unique()))
-        _, ax_small = umap_categorical(cells, "grouping", n=200, palette=palette)
-        _, ax_large = umap_categorical(cells, "grouping", n=3000, palette=palette)
-        first = {c.get_label(): c.get_facecolor()[0][:3] for c in ax_small.collections}
-        second = {c.get_label(): c.get_facecolor()[0][:3] for c in ax_large.collections}
-        for label in first:
-            assert np.allclose(first[label], second[label])
+    def test_dim_subset_restricts_dims(self, embed):
+        fig = latent_umap_grid(embed, dim_subset=["dim_0", "dim_1"], n=500)
+        assert len(fig.axes) == 2 * 2
 
-    def test_continuous_returns_fig_and_ax(self, cells):
-        fig, ax = umap_continuous(cells, "cs", n=1000)
-        assert isinstance(fig, Figure)
+    def test_missing_order_col_raises(self, embed):
+        e = embed.copy()
+        del e.var["order"]
+        with pytest.raises(KeyError, match="order"):
+            latent_umap_grid(e)
 
-    def test_zero_as_background_draws_a_grey_underlay(self, cells):
-        frame = cells.copy()
-        frame.loc[frame.index[:2000], "cs"] = 0.0
-        _, ax = umap_continuous(frame, "cs", zero_as_background=True, n=None)
-        assert len(ax.collections) == 2  # grey zeros, then the coloured rest
+    def test_missing_vanished_raises_when_filtering(self, embed):
+        e = embed.copy()
+        del e.var["vanished"]
+        with pytest.raises(KeyError, match="vanished"):
+            latent_umap_grid(e, remove_vanished=True)
 
-    def test_missing_column_is_named(self, cells):
-        with pytest.raises(KeyError, match="absent"):
-            umap_continuous(cells, "absent")
+    def test_unknown_dim_subset_is_named(self, embed):
+        with pytest.raises(KeyError, match="not_a_dim"):
+            latent_umap_grid(embed, dim_subset=["not_a_dim"])
 
-    def test_explicit_axes_are_honoured(self, cells):
-        with pytest.raises(KeyError, match="nope"):
-            umap_categorical(cells, "grouping", x="nope", y="UMAP_2")
-
-    def test_bare_strips_the_frame(self, cells):
-        _, ax = umap_continuous(cells, "cs", n=100)
-        bare(ax)
-        assert list(ax.get_xticks()) == []
-        assert not any(s.get_visible() for s in ax.spines.values())
 
 class TestEnrichmentFigures:
     def test_heritability_landscape(self, results):
@@ -187,6 +190,15 @@ class TestEnrichmentFigures:
     def test_heritability_landscape_empty_trait(self, results):
         with pytest.raises(ValueError, match="no results to plot"):
             heritability_landscape(results, trait="absent")
+
+    def test_heritability_landscape_titles_map_dim_to_dr_names(self):
+        rows = [
+            {"trait": "t", "dim": "dim_5", "direction": "pos", "Coefficient_z-score": 3.0},
+            {"trait": "t", "dim": "dim_5", "direction": "neg", "Coefficient_z-score": -1.0},
+        ]
+        frame = add_fdr(pd.DataFrame(rows), by="trait")
+        fig, (bars, _) = heritability_landscape(frame, trait="t", titles={"dim_5": "DR 6"})
+        assert {t.get_text() for t in bars.texts} == {"DR 6+", "DR 6-"}
 
     def test_trait_concordance(self, results):
         fig, (scatter, hist) = trait_concordance(results, traits=["t1", "t2"])
@@ -221,6 +233,16 @@ class TestEnrichmentFigures:
         ]
         fig, _ = trait_concordance(pd.DataFrame(rows), traits=["a", "b"])
         assert isinstance(fig, Figure)
+
+    def test_trait_concordance_titles_map_dim_to_dr_names(self):
+        rows = [
+            {"trait": "a", "dim": "dim_5", "direction": "pos", "Coefficient_z-score": 2.0},
+            {"trait": "b", "dim": "dim_5", "direction": "pos", "Coefficient_z-score": 2.5},
+        ]
+        fig, (scatter, _) = trait_concordance(
+            pd.DataFrame(rows), traits=["a", "b"], titles={"dim_5": "DR 6"}
+        )
+        assert {t.get_text() for t in scatter.texts} == {"DR 6+"}
 
     def test_covariate_audit(self, cells):
         fig, axes = covariate_audit(
@@ -297,3 +319,227 @@ class TestFactorFigures:
         )
         fig, ax = covariate_association(series, threshold=0.7)
         assert "2 factor(s)" in ax.get_title()
+
+
+@pytest.fixture
+def dim_stats():
+    rng = np.random.default_rng(3)
+    k = 8
+    return pd.DataFrame(
+        {
+            "order": np.arange(k),
+            "vanished": [False] * (k - 2) + [True] * 2,
+            "title": [f"DR {i + 1}" for i in range(k)],
+            "reconstruction_effect": rng.random(k),
+            "max_value": rng.random(k) * 3,
+            "mean": rng.normal(size=k),
+            "std": rng.random(k) + 0.1,
+        },
+        index=[f"dim_{i}" for i in range(k)],
+    )
+
+
+class TestLatentDimensionStats:
+    def test_one_panel_per_column(self, dim_stats):
+        fig, axes = latent_dimension_stats(dim_stats, columns=("mean", "std"))
+        assert isinstance(fig, Figure)
+        assert len(axes) == 2
+
+    def test_vanished_and_kept_get_two_colours(self, dim_stats):
+        from scads_drvi.pl.color import categorical_palette
+
+        palette = categorical_palette(["vanished", "kept"])
+        _, axes = latent_dimension_stats(dim_stats, columns=("mean",))
+        by_label = {c.get_label(): c for c in axes[0].collections}
+        assert to_hex(by_label["kept"].get_facecolor()[0]) == palette["kept"].lower()
+        assert to_hex(by_label["vanished"].get_facecolor()[0]) == palette["vanished"].lower()
+
+    def test_legend_present_only_when_vanished_kept(self, dim_stats):
+        fig, _ = latent_dimension_stats(dim_stats, columns=("mean",))
+        assert fig.legends
+        fig2, _ = latent_dimension_stats(
+            dim_stats, columns=("mean",), remove_vanished=True
+        )
+        assert not fig2.legends
+
+    def test_log_scale_try_only_for_all_positive_columns(self, dim_stats):
+        _, axes = latent_dimension_stats(dim_stats, columns=("max_value", "mean"))
+        assert axes[0].get_yscale() == "log"  # max_value is all positive
+        assert axes[1].get_yscale() != "log"  # mean can be negative
+
+    def test_missing_order_col_raises(self, dim_stats):
+        frame = dim_stats.drop(columns=["order"])
+        with pytest.raises(KeyError, match="order"):
+            latent_dimension_stats(frame)
+
+    def test_missing_named_column_raises(self, dim_stats):
+        with pytest.raises(KeyError, match="not_a_column"):
+            latent_dimension_stats(dim_stats, columns=("not_a_column",))
+
+
+class TestLatentHeatmap:
+    @pytest.fixture
+    def heatmap_embed(self, dim_stats):
+        rng = np.random.default_rng(4)
+        n = 400
+        x = rng.normal(size=(n, len(dim_stats))).astype(np.float32)
+        obs = pd.DataFrame(
+            {"grouping": rng.choice(["a", "b", "c"], size=n)},
+            index=[f"c{i}" for i in range(n)],
+        )
+        return ad.AnnData(X=x, obs=obs, var=dim_stats.copy())
+
+    def test_returns_fig_and_ax(self, heatmap_embed):
+        fig, ax = latent_heatmap(heatmap_embed, "grouping", make_balanced=False)
+        assert isinstance(fig, Figure)
+
+    def test_remove_vanished_changes_column_count(self, heatmap_embed):
+        _, ax_kept = latent_heatmap(
+            heatmap_embed, "grouping", remove_vanished=True, make_balanced=False
+        )
+        _, ax_all = latent_heatmap(
+            heatmap_embed, "grouping", remove_vanished=False, make_balanced=False
+        )
+        assert len(ax_kept.get_xticklabels()) < len(ax_all.get_xticklabels())
+
+    def test_make_balanced_gives_every_category_the_same_row_count(self, heatmap_embed):
+        _, ax = latent_heatmap(heatmap_embed, "grouping", make_balanced=True, seed=1)
+        counts = heatmap_embed.obs["grouping"].value_counts()
+        expected_n = max(10, int(counts.min()))
+        assert ax.collections[0].get_array().shape[0] == expected_n * counts.size
+
+    def test_make_balanced_is_reproducible(self, heatmap_embed):
+        _, ax1 = latent_heatmap(heatmap_embed, "grouping", make_balanced=True, seed=1)
+        _, ax2 = latent_heatmap(heatmap_embed, "grouping", make_balanced=True, seed=1)
+        np.testing.assert_array_equal(
+            ax1.collections[0].get_array(), ax2.collections[0].get_array()
+        )
+
+    def test_column_labels_match_titles_in_rank_order(self, heatmap_embed):
+        _, ax = latent_heatmap(
+            heatmap_embed, "grouping", remove_vanished=False, make_balanced=False
+        )
+        labels = [t.get_text() for t in ax.get_xticklabels()]
+        kept = heatmap_embed.var.sort_values("order")
+        assert labels == kept["title"].tolist()
+
+    def test_cluster_order_can_differ_from_rank_order(self, dim_stats):
+        # Two dims deliberately anti-correlated, so a correlation-clustering leaf order
+        # must not coincide with the plain rank order for every possible outcome.
+        rng = np.random.default_rng(5)
+        n = 300
+        base = rng.normal(size=n)
+        x = np.column_stack(
+            [base, -base] + [rng.normal(size=n) for _ in range(len(dim_stats) - 2)]
+        ).astype(np.float32)
+        obs = pd.DataFrame(
+            {"grouping": rng.choice(["a", "b"], size=n)}, index=[f"c{i}" for i in range(n)]
+        )
+        heatmap_embed = ad.AnnData(X=x, obs=obs, var=dim_stats.copy())
+
+        _, ax_rank = latent_heatmap(heatmap_embed, "grouping", order="rank", make_balanced=False)
+        _, ax_cluster = latent_heatmap(
+            heatmap_embed, "grouping", order="cluster", make_balanced=False
+        )
+        rank_labels = [t.get_text() for t in ax_rank.get_xticklabels()]
+        cluster_labels = [t.get_text() for t in ax_cluster.get_xticklabels()]
+        assert rank_labels != cluster_labels
+
+    def test_sort_by_categorical_reproduces_drvis_own_heuristic(self, heatmap_embed):
+        kept = heatmap_embed[:, ~heatmap_embed.var["vanished"].to_numpy(dtype=bool)]
+        expected = np.asarray(kept.var["title"])[
+            np.argsort(np.abs(np.asarray(kept.X)).argmax(axis=0))
+        ]
+        _, ax = latent_heatmap(
+            heatmap_embed, "grouping", sort_by_categorical=True, make_balanced=False
+        )
+        labels = [t.get_text() for t in ax.get_xticklabels()]
+        assert labels == list(expected)
+
+    def test_missing_categorical_column_raises(self, heatmap_embed):
+        with pytest.raises(KeyError, match="absent"):
+            latent_heatmap(heatmap_embed, "absent")
+
+    def test_missing_order_col_raises(self, heatmap_embed):
+        del heatmap_embed.var["order"]
+        with pytest.raises(KeyError, match="order"):
+            latent_heatmap(heatmap_embed, "grouping")
+
+    def test_missing_vanished_raises_when_filtering(self, heatmap_embed):
+        del heatmap_embed.var["vanished"]
+        with pytest.raises(KeyError, match="vanished"):
+            latent_heatmap(heatmap_embed, "grouping", remove_vanished=True)
+
+
+class TestLatentHeatmapWithHeritability:
+    @pytest.fixture
+    def values_and_categories(self, dim_stats):
+        rng = np.random.default_rng(4)
+        n = 400
+        values = pd.DataFrame(
+            rng.normal(size=(n, len(dim_stats))),
+            columns=dim_stats.index,
+            index=[f"c{i}" for i in range(n)],
+        )
+        categories = pd.Series(
+            rng.choice(["a", "b", "c"], size=n), index=values.index
+        )
+        return values, categories
+
+    @pytest.fixture
+    def heritability(self, dim_stats):
+        rng = np.random.default_rng(6)
+        return pd.Series(rng.normal(size=len(dim_stats)), index=dim_stats.index)
+
+    def test_returns_fig_and_two_axes(self, values_and_categories, dim_stats, heritability):
+        values, categories = values_and_categories
+        fig, (bar, heat) = latent_heatmap_with_heritability(
+            values, categories, dim_stats, heritability
+        )
+        assert isinstance(fig, Figure)
+        assert bar is not heat
+
+    def test_bar_and_heatmap_share_column_order(
+        self, values_and_categories, dim_stats, heritability
+    ):
+        values, categories = values_and_categories
+        _, (bar, heat) = latent_heatmap_with_heritability(
+            values, categories, dim_stats, heritability, remove_vanished=False
+        )
+        kept = dim_stats.sort_values("order").index.tolist()
+        np.testing.assert_allclose(
+            [b.get_height() for b in bar.patches], heritability.loc[kept].to_numpy()
+        )
+        assert len(bar.patches) == len(heat.get_xticklabels())
+
+    def test_missing_heritability_value_raises(
+        self, values_and_categories, dim_stats, heritability
+    ):
+        values, categories = values_and_categories
+        # dim_stats.index[0] is a kept (non-vanished) dim, so dropping it must be seen.
+        with pytest.raises(KeyError, match="heritability has no value"):
+            latent_heatmap_with_heritability(
+                values, categories, dim_stats, heritability.drop(dim_stats.index[0])
+            )
+
+    def test_q_colors_and_draws_significance_legend(
+        self, values_and_categories, dim_stats, heritability
+    ):
+        values, categories = values_and_categories
+        q = pd.Series(
+            np.linspace(0.001, 0.5, len(dim_stats)), index=dim_stats.index
+        )
+        fig, (bar, heat) = latent_heatmap_with_heritability(
+            values, categories, dim_stats, heritability, heritability_q=q
+        )
+        assert bar.legend_ is not None
+        assert bar.lines  # threshold lines drawn
+
+    def test_missing_q_value_raises(self, values_and_categories, dim_stats, heritability):
+        values, categories = values_and_categories
+        q = pd.Series(np.full(len(dim_stats), 0.01), index=dim_stats.index)
+        with pytest.raises(KeyError, match="heritability_q has no value"):
+            latent_heatmap_with_heritability(
+                values, categories, dim_stats, heritability,
+                heritability_q=q.drop(dim_stats.index[0]),
+            )
