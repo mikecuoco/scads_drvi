@@ -324,7 +324,7 @@ def kept_dims(fmap: pd.DataFrame) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# The result h5ad (see scads_drvi.factorize.result)
+# The result h5ad (see scads_drvi.enrich.embed)
 # ---------------------------------------------------------------------------
 
 def latent_stats_from_embed(embed) -> pd.DataFrame:
@@ -332,10 +332,9 @@ def latent_stats_from_embed(embed) -> pd.DataFrame:
     expects.
 
     DRVI's own ``model.set_latent_dimension_stats`` already wrote these columns onto
-    ``embed.var`` when the object was built
-    (:func:`scads_drvi.factorize.result.build_embed`), so there is no file to read --
-    this just gives the in-memory table the shape the rest of this module was written
-    against.
+    ``embed.var`` when the object was built (see the getting-started guide's training
+    example), so there is no file to read -- this just gives the in-memory table the
+    shape the rest of this module was written against.
     """
     frame = embed.var.reset_index(names="dim")
     frame["dim"] = frame["dim"].astype(str)
@@ -350,7 +349,7 @@ def kept_loadings(embed, fmap: pd.DataFrame):
 
     A caller that needs one direction's non-negative loadings (for S-LDSC's top-frac
     annotation ranking) derives it explicitly with
-    :func:`scads_drvi.factorize.result.directional_loadings` first; this function only
+    :func:`scads_drvi.enrich.embed.directional_loadings` first; this function only
     subsets to the kept dimensions, in `fmap`'s order, from whatever `embed` it is given.
     """
     import pandas as pd
@@ -362,7 +361,7 @@ def kept_loadings(embed, fmap: pd.DataFrame):
 
 def kept_feature_loadings(feature_loadings, fmap: pd.DataFrame):
     """peaks x kept-dims, from the companion loadings h5ad
-    (:func:`scads_drvi.factorize.result.read_feature_loadings`)."""
+    (:func:`scads_drvi.enrich.embed.read_feature_loadings`)."""
     import pandas as pd
 
     keep = kept_dims(fmap)

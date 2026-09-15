@@ -29,10 +29,11 @@ jobs:
           python-version: "3.12"
 
       # Same convention as tests.yml: install the doc-building stack and the package's
-      # OWN dependencies explicitly, then `--no-deps` so pyproject's torch/scvi-tools/
-      # drvi-py (needed by factorize/ and io.result at runtime, not by Sphinx) are never
-      # pulled in here. autodoc_mock_imports in conf.py covers every module that would
-      # otherwise need them at import time.
+      # OWN dependencies explicitly, then `--no-deps` so the optional `drvi` extra
+      # (torch/scvi-tools/drvi-py -- not imported by this package at all; only a caller
+      # following the getting-started guide needs them) is never pulled in here.
+      # autodoc_mock_imports in conf.py covers every module that would otherwise need
+      # them at import time.
       - name: Install documentation dependencies
         run: |
           python -m pip install --upgrade pip

@@ -34,38 +34,58 @@ interpretability functions expect it: `obs` = cells, `var` = one row per latent
 dimension, `X` = the signed latent representation. There is no separate
 path-configuration object — every function takes an explicit path.
 
-```python
-from scads_drvi.factorize.model import train_fit
+This package does not wrap training or loading a DRVI model at all: call
+`scvi.external.DRVI` directly, the same way
+[DRVI's own tutorial](https://drvi.readthedocs.io/latest/tutorials/external/general_pipeline.html)
+does, and hand the result to `write_result`:
 
-embed = train_fit(
-    adata,                      # registered against nothing yet -- train_fit does it
-    n_latent=96,
-    batch_key="donor",
-    obs_columns=["cell_type", "tissue", "donor"],
-    result_path="my_fit.h5ad",
-    model_dir="my_fit/model",
+```python
+from scvi.external import DRVI
+import anndata as ad
+from scads_drvi.enrich.embed import write_result
+
+DRVI.setup_anndata(adata, batch_key="donor")
+model = DRVI(adata, n_latent=96)
+model.train(max_epochs=200)
+model.save("my_fit/model", overwrite=True)
+
+embed = ad.AnnData(
+    model.get_latent_representation(adata),
+    obs=adata.obs[["cell_type", "tissue", "donor"]].copy(),
 )
+embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+model.set_latent_dimension_stats(embed)   # vanished, order, title, and friends
 embed.obsm["X_umap"] = umap.UMAP().fit_transform(embed.X)   # set once computed, not read
+
+write_result(
+    "my_fit.h5ad", embed,
+    provenance={"n_latent": 96, "batch_key": "donor", "model_dir": "my_fit/model"},
+)
 ```
 
-`train_fit` trains, saves the checkpoint to `model_dir`, and writes the canonical result
-h5ad to `result_path` in one call, returning the written object. `embed.var` is
-populated with DRVI's own per-dimension statistics (`model.set_latent_dimension_stats`)
-— `vanished`, `order`, `title`, and friends — so `embed` is immediately usable with
+`embed.var` is populated by DRVI's own per-dimension statistics
+(`model.set_latent_dimension_stats`), so `embed` is immediately usable with
 `drvi.utils.pl.*` and `drvi.utils.metrics.*`.
 
-Given a checkpoint trained elsewhere, `load_fit` picks it back up and
-`build_embed`/`write_result` do the same two steps split apart:
+Loading a checkpoint back is the same `DRVI.load` call DRVI's own tutorial shows —
+register `adata` with the **same** `batch_key` the fit was trained with (nothing checks
+this for you; get it from wherever you recorded it, e.g. your own `provenance` dict):
 
 ```python
-from scads_drvi.factorize.model import load_fit, fit_meta, setup_anndata_like
-from scads_drvi.factorize.result import build_embed, write_result
+from scvi.external import DRVI
+import anndata as ad
+from scads_drvi.enrich.embed import write_result
 
-meta = fit_meta("my_fit/model")
-setup_anndata_like(adata, meta)
-model = load_fit("my_fit/model", adata=adata)
-embed = build_embed(model, adata, obs_columns=["cell_type", "tissue", "donor"])
-write_result("my_fit.h5ad", embed, provenance=meta.raw)
+DRVI.setup_anndata(adata, batch_key="donor")
+model = DRVI.load("my_fit/model", adata=adata)
+
+embed = ad.AnnData(
+    model.get_latent_representation(adata),
+    obs=adata.obs[["cell_type", "tissue", "donor"]].copy(),
+)
+embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+model.set_latent_dimension_stats(embed)
+write_result("my_fit.h5ad", embed, provenance={"n_latent": 96, "batch_key": "donor"})
 ```
 
 ## Reading a finished run
@@ -87,8 +107,8 @@ derived on demand, see below):
 
 ```python
 from scads_drvi.enrich.config import kept_dims, latent_stats_from_embed, select_factors
+from scads_drvi.enrich.embed import attach_enrich_results, write_result
 from scads_drvi.enrich.ldsc import read_results
-from scads_drvi.factorize.result import attach_enrich_results, write_result
 
 stats = latent_stats_from_embed(embed)
 fmap = select_factors(stats, list(embed.var_names))
@@ -106,7 +126,7 @@ arm["results"].query("direction == 'pos' and trait == 'trait_a'")
 ## Computing cell scores
 
 ```python
-from scads_drvi.factorize.result import directional_loadings
+from scads_drvi.enrich.embed import directional_loadings
 from scads_drvi.scores.cell import cs_from_z
 
 primary = arm["results"].loc[arm["results"]["trait"] == "trait_a"]
@@ -125,10 +145,8 @@ are confined by directory and imported inside functions:
 
 | module | needs |
 |---|---|
-| `factorize/model.py` | `torch`, `scvi-tools` (function-local) |
-| `factorize/result.py` | `anndata` (function-local) |
+| `enrich/embed.py` | `anndata` (function-local) |
 | `pl/` | `matplotlib`, `seaborn` (function-local) |
-| `factorize/h5ad.py` | `h5py` at module scope |
 | everything else | `numpy` / `pandas` / `scipy` / `pyyaml` |
 
 This matters because the environment that runs enrichment stages has no torch, scvi,

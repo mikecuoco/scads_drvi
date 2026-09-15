@@ -27,13 +27,16 @@ dependencies = [
     "anndata>=0.10",
     "matplotlib>=3.8",
     "seaborn>=0.13",
-    "scvi-tools>=1.5",
-    "torch>=2.4",
-    "drvi-py>=0.2.7",
 ]
 
+# torch/scvi-tools/drvi-py are not imported anywhere in this package (training and
+# loading a DRVI model is the caller's own job, done directly against
+# `scvi.external.DRVI` -- see the getting-started guide). They are an optional extra,
+# not a hard dependency, so `pip install scads-drvi` stays light for callers who only
+# need the enrichment/scoring/plotting stages.
 [project.optional-dependencies]
 test = ["pytest>=7.4"]
+drvi = ["scvi-tools>=1.5", "torch>=2.4", "drvi-py>=0.2.7"]
 docs = [
     "sphinx>=7.3",
     "sphinx-book-theme>=1.1",

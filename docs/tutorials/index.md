@@ -10,7 +10,8 @@ computes:
 peaks × cells (10x PBMC scATAC)
         │
         ▼
-  Factorize        ── train_fit: fit DRVI, save the checkpoint, write the result h5ad
+  Factorize        ── scvi.external.DRVI directly: fit, save the checkpoint, write the
+                       result h5ad
         │
         ▼
   Enrich            ── annotate peaks, run S-LDSC, attach_enrich_results
@@ -23,7 +24,7 @@ peaks × cells (10x PBMC scATAC)
 ```
 
 Every function above takes an explicit path; a fit's results live in one `AnnData`
-(see `factorize.result`) rather than a directory tree a configuration object derives
+(see `enrich.embed`) rather than a directory tree a configuration object derives
 paths into.
 
 ```{toctree}
