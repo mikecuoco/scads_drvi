@@ -324,7 +324,8 @@ def kept_dims(fmap: pd.DataFrame) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# The result h5ad (see scads_drvi.enrich.embed)
+# The result h5ad -- obs = cells, var = one row per latent dimension, built and
+# written with plain anndata calls at the call site (see the getting-started guide)
 # ---------------------------------------------------------------------------
 
 def latent_stats_from_embed(embed) -> pd.DataFrame:
@@ -348,9 +349,10 @@ def kept_loadings(embed, fmap: pd.DataFrame):
     """cells x kept-dims, straight from a result h5ad's signed ``X`` -- no ReLU.
 
     A caller that needs one direction's non-negative loadings (for S-LDSC's top-frac
-    annotation ranking) derives it explicitly with
-    :func:`scads_drvi.enrich.embed.directional_loadings` first; this function only
-    subsets to the kept dimensions, in `fmap`'s order, from whatever `embed` it is given.
+    annotation ranking) derives it explicitly first (``np.clip(embed.X, 0, None)`` for
+    the positive direction, ``np.clip(-embed.X, 0, None)`` for negative); this function
+    only subsets to the kept dimensions, in `fmap`'s order, from whatever `embed` it is
+    given.
     """
     import pandas as pd
 
@@ -360,8 +362,8 @@ def kept_loadings(embed, fmap: pd.DataFrame):
 
 
 def kept_feature_loadings(feature_loadings, fmap: pd.DataFrame):
-    """peaks x kept-dims, from the companion loadings h5ad
-    (:func:`scads_drvi.enrich.embed.read_feature_loadings`)."""
+    """peaks x kept-dims, from the companion loadings h5ad (however it was saved and
+    loaded, e.g. plain ``anndata.read_h5ad``)."""
     import pandas as pd
 
     keep = kept_dims(fmap)

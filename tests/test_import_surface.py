@@ -2,13 +2,15 @@
 
 ``torch``/``scvi-tools``/``drvi`` are never imported anywhere in this package at all --
 training and loading a DRVI model is the caller's own job, done directly against
-``scvi.external.DRVI`` (see the getting-started guide). ``matplotlib``/``seaborn``
-belong to :mod:`scads_drvi.pl`, and ``h5py``/``anndata`` are function-local wherever a
-module needs them -- :mod:`scads_drvi.enrich.embed` is the one core module that uses
-``anndata``, function-local throughout. Everything else must import in an environment
+``scvi.external.DRVI`` (see the getting-started guide). ``matplotlib``/``seaborn``/
+``scanpy``/``h5py``/``anndata`` belong to :mod:`scads_drvi.pl` (every embedding figure
+there now wraps ``scanpy.pl.embedding``, function-local, the same as
+matplotlib/seaborn always were) -- no core module needs a result h5ad's own I/O, since
+that is a plain ``anndata.read_h5ad``/``AnnData.write_h5ad`` call at the caller's own
+site, not something this package wraps. Everything else must import in an environment
 that has none of them -- which is not hypothetical: the environment that runs the
-enrichment stages has no torch, no scvi, no drvi, no matplotlib, no seaborn, no h5py and
-no anndata.
+enrichment stages has no torch, no scvi, no drvi, no matplotlib, no seaborn, no scanpy,
+no h5py and no anndata.
 
 The check runs in a subprocess with a meta-path finder blocking those modules, because
 by the time this test module is imported they may already be in ``sys.modules``.
@@ -34,7 +36,6 @@ CORE_MODULES = [
     "scads_drvi.stats",
     "scads_drvi.scores.cell",
     "scads_drvi.scores.aggregate",
-    "scads_drvi.enrich.embed",
     "scads_drvi.enrich.ldsc",
     "scads_drvi.enrich.h2_output",
     "scads_drvi.enrich.annotations",
@@ -46,15 +47,11 @@ CORE_MODULES = [
 # Deliberately absent, each for a reason rather than an oversight. Listed so that adding
 # a module here is a decision someone made, not a gap nobody noticed:
 #
-#   scads_drvi.pl.*               matplotlib / seaborn
+#   scads_drvi.pl.*               matplotlib / seaborn / scanpy (-> anndata)
 #   scads_drvi.enrich.config      module-scope numpy, pandas and yaml
 #   scads_drvi._util.presets      argparse CLI plumbing, not part of the library surface
-#
-# scads_drvi.enrich.embed is the one enrich submodule that imports anndata/numpy/pandas
-# function-local throughout (same contract factorize.result held before that package was
-# deleted in favor of calling scvi.external.DRVI directly), so it stays core above.
 
-BLOCKED = ("torch", "scvi", "drvi", "matplotlib", "seaborn", "h5py", "anndata")
+BLOCKED = ("torch", "scvi", "drvi", "matplotlib", "seaborn", "scanpy", "h5py", "anndata")
 
 _BLOCKER = textwrap.dedent(
     """

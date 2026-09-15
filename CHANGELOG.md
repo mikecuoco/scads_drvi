@@ -6,6 +6,14 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **Breaking: `enrich.embed` is deleted.** `write_result`, `read_feature_loadings`,
+  `attach_enrich_results` and `directional_loadings` were the module's whole surface;
+  each was a thin wrapper a caller can write inline just as easily -- a write is
+  `embed.write_h5ad(path)` after setting `embed.uns["provenance"]`, an enrichment arm is
+  attached with a plain `embed.uns.setdefault("enrich", {})[model] = {...}`, and a
+  directional loadings view is `np.clip(embed.X, 0, None)`/`np.clip(-embed.X, 0, None)`.
+  The companion peaks x K feature-loadings file this module also wrote/read has no
+  replacement; a caller who needs it writes/reads that h5ad directly the same way.
 - **Breaking: a fit's results now live in one `AnnData` (`io.result`), not a directory
   of TSVs plus a `Project`.** `config.Project`, `io.contract`, `io.meta`, `labels`
   (`FactorLabels`, `load_labels`, the `dim_j`/`k{i}`/`dim_47/neg` three-name system) and
@@ -19,12 +27,41 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `.load_fit` now take explicit paths; `enrich.ldsc.read_results` takes an
   `annot2dim` mapping and a `direction` instead of a `FactorLabels`;
   `scores.cell.cs_from_z` drops its `labels=` argument, made unnecessary by the above.
-- **`viz` renamed to `pl`.** Two of its functions are deleted because DRVI's own package
-  now covers them directly: `latent_dimension_stats` (use
-  `drvi.utils.pl.plot_latent_dimension_stats`) and `group_factor_heatmaps` (use
-  `drvi.utils.pl.plot_latent_dims_in_heatmap`); `umap.umap_factor_grid` is likewise
-  replaced by `drvi.utils.pl.plot_latent_dims_in_umap`. `drvi-py` is a new required
-  dependency, imported function-local everywhere it's used.
+- **`viz` renamed to `pl`.** Two of its functions were deleted in favor of DRVI's own
+  package: `latent_dimension_stats` (`drvi.utils.pl.plot_latent_dimension_stats`) and
+  `group_factor_heatmaps` (`drvi.utils.pl.plot_latent_dims_in_heatmap`);
+  `umap.umap_factor_grid` was likewise replaced by `drvi.utils.pl.plot_latent_dims_in_umap`.
+  Superseded below by in-house replacements — see "Reworked `pl.*` embedding and
+  latent-dimension figures".
+- **Reworked `pl.*` embedding and latent-dimension figures.** `pl.umap.umap_categorical`/
+  `umap_continuous` (plain x/y-frame scatters) are removed, and their would-be
+  replacements `embedding_categorical`/`embedding_continuous` were built, then removed
+  again: a plain categorical or continuous embedding scatter is just
+  `sc.pl.embedding(embed, basis="umap", color=..., vmin="p1", vmax="p99.5")` directly —
+  scanpy already does point sizing, a stable per-category palette, a colorbar, and
+  (via its own percentile-string `vmin`/`vmax`) this project's own robust colour limits,
+  so there is nothing left here worth wrapping. `pl.umap.point_style` and `pl.umap.bare`
+  are removed too (scanpy already handles point sizing and frame stripping);
+  `pl.umap.subsample` is unchanged and still used by `pl.enrichment.covariate_audit`.
+  New: `pl.umap.latent_umap_grid` (the one embedding figure that does earn a wrapper —
+  a directional +/- split and per-panel titles/limits from one `sc.pl.embedding` call),
+  `pl.factors.latent_dimension_stats` and `pl.factors.latent_heatmap` — this project's
+  own in-house replacements for `drvi.utils.pl.plot_latent_dims_in_umap`/
+  `plot_latent_dimension_stats`/`plot_latent_dims_in_heatmap`, restyled to this
+  package's colour policy (`pl.color.percentile_bounds` maps `ROBUST_LIMITS` onto
+  scanpy's own `"pN"` percentile syntax). `latent_heatmap` in particular mirrors DRVI's
+  own signature closely (`embed`, `categorical_column`, `title_col`, `order_col`,
+  `sort_by_categorical`, `make_balanced`, `remove_vanished`) and draws via
+  `seaborn.heatmap` rather than hand-rolled `imshow`/ticks/colorbar; `order="cluster"`
+  is this project's own addition (hierarchical clustering via `pl.factors._cluster_order`,
+  extracted from `factor_correlation` and now shared by both). `drvi-py`'s plotting is
+  no longer needed for any figure this package draws.
+- **`scanpy` is now a hard dependency**, and the project floor is raised to match its own
+  (`requires-python>=3.12`, `numpy>=2`, `pandas>=2.3`, up from `>=3.10`/`>=1.26`/`>=2.1`) —
+  every embedding figure in `pl.*` wraps `scanpy.pl.embedding`, not only the
+  DRVI-specific ones, so it is no longer optional the way `drvi-py`/`scvi-tools`/`torch`
+  are. The `floors` CI job is repinned to `numpy==2.0.0`/`pandas==2.3.0`/`scanpy==1.12.4`
+  accordingly.
 
 ### Added
 - `enrich.annotations` — widens a thin annotation into the full `CHR BP SNP CM + K`
@@ -35,7 +72,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   coverage: pyflakes, bugbear, isort and pyupgrade.
 - Continuous integration on three dependency stacks mirroring the three environments the
   package is deployed into — no optional dependencies at all, the declared floors
-  (numpy 1.26 / pandas 2.1), and a current stack with h5py and plotting.
+  (Python 3.12 / numpy 2 / pandas 2.3, scanpy's own floor), and a current stack with
+  h5py and plotting.
 
 ### Fixed
 - `io.h5ad.read_obs` indexed the category table with anndata's raw codes, so a **missing**

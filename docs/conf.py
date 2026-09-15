@@ -58,7 +58,7 @@ autodoc_member_order = "bysource"
 # them itself (training/loading a DRVI model is the caller's own job, done directly
 # against `scvi.external.DRVI`) -- CI's docs job does not install them regardless.
 # `anndata` is mocked too, even though it's lighter than the others, because
-# `enrich.embed`'s `from __future__ import annotations` leaves its `AnnData`-typed
+# `pl.umap`'s `from __future__ import annotations` leaves its `AnnData`-typed
 # signatures as strings that sphinx-autodoc-typehints resolves at build time; without a
 # real or mocked `anndata` that resolution raises a NameError.
 autodoc_mock_imports = [

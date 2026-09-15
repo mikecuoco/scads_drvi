@@ -7,9 +7,9 @@ seven regions are called something.
 
 So this builds a complete synthetic analysis from scratch -- a plant single-cell
 experiment, with tissues, cultivars and agronomic traits -- and runs it end to end:
-h5ad obs -> the cells x K embed -> write_result -> factor selection -> LDSC results ->
-attach_enrich_results -> BH -> per-cell scores -> aggregation -> figures. Nothing here
-is renamed from the real analysis; the point is that no name matches.
+h5ad obs -> the cells x K embed -> written to h5ad -> factor selection -> LDSC results
+-> attached into uns["enrich"] -> BH -> per-cell scores -> aggregation -> figures.
+Nothing here is renamed from the real analysis; the point is that no name matches.
 
 If the package ever grows an assumption about the real dataset, this fails.
 """
@@ -21,6 +21,7 @@ import pandas as pd
 import pytest
 
 ad = pytest.importorskip("anndata")
+sc = pytest.importorskip("scanpy")
 matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
 
@@ -31,11 +32,6 @@ from scads_drvi.enrich.config import (  # noqa: E402
     latent_stats_from_embed,
     select_factors,
 )
-from scads_drvi.enrich.embed import (  # noqa: E402
-    attach_enrich_results,
-    directional_loadings,
-    write_result,
-)
 from scads_drvi.enrich.ldsc import read_results  # noqa: E402
 from scads_drvi.pl.enrichment import (  # noqa: E402
     covariate_audit,
@@ -44,9 +40,10 @@ from scads_drvi.pl.enrichment import (  # noqa: E402
     score_by_group,
     trait_concordance,
 )
+from scads_drvi.pl.factors import latent_dimension_stats, latent_heatmap  # noqa: E402
 from scads_drvi.pl.frugal import box_stats  # noqa: E402
 from scads_drvi.pl.save import save_figure  # noqa: E402
-from scads_drvi.pl.umap import umap_categorical, umap_continuous  # noqa: E402
+from scads_drvi.pl.umap import latent_umap_grid  # noqa: E402
 from scads_drvi.scores.aggregate import (  # noqa: E402
     block_order,
     eta_squared,
@@ -95,6 +92,13 @@ class _FakeModel:
         embed.var["vanished"] = self._vanished
         embed.var["order"] = np.arange(embed.n_vars)
         embed.var["title"] = [f"DR {i + 1}" for i in range(embed.n_vars)]
+        # The stat columns real DRVI writes too -- trivially derived from the fixed
+        # latent matrix, exactly enough for latent_dimension_stats/latent_umap_grid to
+        # exercise for real rather than being skipped by this synthetic fixture.
+        embed.var["reconstruction_effect"] = np.abs(self._z).mean(axis=0)
+        embed.var["max_value"] = np.abs(self._z).max(axis=0)
+        embed.var["mean"] = self._z.mean(axis=0)
+        embed.var["std"] = self._z.std(axis=0)
 
 
 @pytest.fixture(scope="module")
@@ -157,9 +161,8 @@ def analysis(tmp_path_factory):
     embed.obsm["X_umap"] = rng.normal(size=(N_CELLS, 2)).astype(np.float32)
 
     path = root / "assembly_v3.h5ad"
-    write_result(
-        path, embed, provenance={"n_latent": N_FACTORS, "fit_name": "assembly_v3"}
-    )
+    embed.uns["provenance"] = {"n_latent": N_FACTORS, "fit_name": "assembly_v3"}
+    embed.write_h5ad(path)
 
     # -- factor selection, exactly the way the real enrichment stage would ------------
     embed = ad.read_h5ad(path)
@@ -187,8 +190,11 @@ def analysis(tmp_path_factory):
             ).to_csv(trait_dir / f"{annot}.results", sep="\t", index=False)
 
     results = read_results(results_root, traits=TRAITS, annot2dim=annot2dim)
-    attach_enrich_results(embed, ARM, results, factor_selection=fmap)
-    write_result(path, embed, provenance=embed.uns["provenance"])
+    embed.uns.setdefault("enrich", {})[ARM] = {
+        "results": results,
+        "factor_selection": fmap.drop(columns="annot_index"),
+    }
+    embed.write_h5ad(path)
 
     return {"path": path, "obs": obs_path, "keep": keep}
 
@@ -233,7 +239,9 @@ def test_scores_and_aggregation_over_alien_groupings(analysis):
     primary = arm["results"].loc[arm["results"]["trait"] == "plant_height"]
     assert int(significant(primary).sum()) >= 1
 
-    loadings = directional_loadings(embed, "pos")[keep]
+    loadings = pd.DataFrame(
+        np.clip(embed.X, 0, None), index=embed.obs_names, columns=embed.var_names
+    )[keep]
     scores = cs_from_z(loadings, primary, model=ARM, trait="plant_height")
     assert scores.kind is ScoreKind.Z_WEIGHTED
     assert scores.null == 0.0
@@ -274,13 +282,14 @@ def test_every_figure_draws_and_saves(analysis, tmp_path):
     keep = analysis["keep"]
 
     primary = arm["results"].loc[arm["results"]["trait"] == "plant_height"]
-    loadings = directional_loadings(embed, "pos")[keep]
+    loadings = pd.DataFrame(
+        np.clip(embed.X, 0, None), index=embed.obs_names, columns=embed.var_names
+    )[keep]
     scores = cs_from_z(loadings, primary, model=ARM, trait="plant_height")
 
     cells = embed.obs.copy()
-    cells["embed_1"] = embed.obsm["X_umap"][:, 0]
-    cells["embed_2"] = embed.obsm["X_umap"][:, 1]
     cells["score"] = scores.values.reindex(cells.index)
+    embed.obs["score"] = cells["score"]
 
     outdir = tmp_path / "figures"
     written: list = []
@@ -297,10 +306,13 @@ def test_every_figure_draws_and_saves(analysis, tmp_path):
     )
     written += save_figure(fig, "03_covariates", outdir)
 
-    fig, _ = umap_categorical(cells, "fine_type", x="embed_1", y="embed_2", n=500)
+    # A plain categorical/continuous embedding scatter is just a scanpy call now --
+    # scads_drvi.pl.umap only wraps the per-dimension grid (below), not this.
+    fig = sc.pl.embedding(embed, basis="umap", color="fine_type", show=False, return_fig=True)
     written += save_figure(fig, "04a_groups", outdir)
-    fig, _ = umap_continuous(
-        cells, "score", x="embed_1", y="embed_2", n=500, colorbar_label=scores.label
+    fig = sc.pl.embedding(
+        embed, basis="umap", color="score", vmin="p1", vmax="p99.5",
+        show=False, return_fig=True,
     )
     written += save_figure(fig, "04b_score", outdir)
 
@@ -321,7 +333,16 @@ def test_every_figure_draws_and_saves(analysis, tmp_path):
     )
     written += save_figure(fig, "06_landscape", outdir)
 
-    assert len(written) == 14  # seven figures, pdf + png each
+    fig = latent_umap_grid(embed, n=500)
+    written += save_figure(fig, "07_latent_umap_grid", outdir)
+
+    fig, _ = latent_dimension_stats(embed.var)
+    written += save_figure(fig, "08_latent_dimension_stats", outdir)
+
+    fig, _ = latent_heatmap(embed, "fine_type")
+    written += save_figure(fig, "09_latent_heatmap", outdir)
+
+    assert len(written) == 20  # ten figures, pdf + png each
     assert all(p.exists() and p.stat().st_size > 0 for p in written)
 
 
