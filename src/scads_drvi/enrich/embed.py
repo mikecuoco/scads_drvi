@@ -1,59 +1,18 @@
-"""One ``AnnData`` per fit -- the object this package reads and writes.
+"""This project's own data model for a DRVI fit's results -- not a DRVI wrapper.
 
-This lives under ``enrich/`` rather than a separate package because it is this
-project's own data model for a fit's results, not a DRVI wrapper -- DRVI's own
-tutorial (https://drvi.readthedocs.io/latest/tutorials/external/general_pipeline.html)
-covers training, loading and getting a latent representation directly via
-``scvi.external.DRVI``; nothing here duplicates that. What's here has no DRVI
-equivalent at all: attaching an S-LDSC enrichment arm's results, deriving the
-pos/neg split S-LDSC needs, and safely writing/reading the object those live on.
-It is used right after training too, before any enrichment has happened -- re-homed
-under ``enrich/`` because it is the enrichment stage's data model, not because it is
-enrichment-only in when it gets called.
+Everything a fit produces (signed latent representation, DRVI's own per-dimension
+stats, a UMAP embedding, per-cell scores, S-LDSC enrichment results) lives in one
+h5ad, shaped the way DRVI's interpretability API expects: ``obs`` = cells, ``var`` =
+one row per latent dimension. Building `embed` is a few lines at the call site (see
+the getting-started guide), not a function here.
 
-Everything a fit produces -- the signed latent representation, DRVI's own per-dimension
-statistics, a UMAP embedding, per-cell disease scores and S-LDSC enrichment results --
-lives in one h5ad, shaped exactly the way DRVI's own interpretability API expects
-(``obs`` = cells, ``var`` = one row per latent dimension). That shape is deliberate:
-``model.set_latent_dimension_stats``, ``drvi.utils.pl.plot_latent_dimension_stats``,
-``plot_latent_dims_in_umap`` and ``plot_latent_dims_in_heatmap`` all take exactly this
-object, so nothing here has to adapt our data to theirs. Building it is a handful of
-lines at the call site (see the getting-started guide), not a function here:
+There is no persisted pos/neg split -- S-LDSC's need for one is met by deriving a
+view from the canonical signed ``X`` on demand (:func:`directional_loadings`), never
+by storing separate columns.
 
-    from scvi.external import DRVI
-    import anndata as ad
-
-    embed = ad.AnnData(model.get_latent_representation(adata), obs=adata.obs[cols].copy())
-    embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
-    model.set_latent_dimension_stats(embed, vanished_threshold=0.5)
-
-**There is no persisted pos/neg split.** DRVI itself has none either -- its own
-``directional=True`` machinery only computes or plots things twice at call time and
-never doubles ``var``. S-LDSC needs one annotation per direction, and that need is real,
-but it is met by deriving a view from the canonical signed matrix at the moment it is
-needed (:func:`directional_loadings`), not by storing ``dim_j/pos`` and ``dim_j/neg`` as
-separate columns. A signed ``X`` is the only thing ever written to disk; a split is
-always a computation, never a file.
-
-Peak-level ("feature") loadings are the one thing that does not fit this shape --
-``obs`` = peaks would collide with ``obs`` = cells on the same object -- so they live in
-a small companion file, linked by path from ``uns["provenance"]``. Peak names are
-validated against the canonical ``chr:start-end`` form when that companion is written --
-there is no separate peak-name-normalizing module here, because renaming happens once,
-at the point a fit is saved, not on every later read.
-
-**This module does not wrap plain ``anndata`` reads.** A bare read is just
-``anndata.read_h5ad(path)`` (or ``backed="r"``/``backed=True`` for a large object) --
-call it directly rather than through a passthrough here. Likewise, a derived obs column
-(a ratio, a log, a bucketed value) is a line of pandas at the call site, not a named
-helper::
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-        adata.obs["frac"] = np.where(denom > 0, num / denom, np.nan)
-
-computed however the caller's data actually needs it -- the ``errstate`` guard silences
-the expected warning from dividing where `denom` is zero, since the ``where`` already
-routes those entries to ``nan`` rather than using the division's result.
+Peak-level ("feature") loadings don't fit this shape (``obs`` = peaks would collide
+with ``obs`` = cells), so they live in a small companion h5ad linked from
+``uns["provenance"]["feature_loadings_path"]``.
 """
 
 from __future__ import annotations
@@ -61,7 +20,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -78,9 +37,7 @@ __all__ = [
     "directional_loadings",
 ]
 
-#: The canonical peak-name form every feature-loadings index must already be in by the
-#: time it reaches `write_result` -- enforced here, once, at fit-save time, rather than
-#: normalized defensively wherever a peak name is later read.
+#: Canonical peak-name form (chr:start-end), enforced once here at fit-save time.
 _PEAK_RE = re.compile(r"^chr[\w.]+:\d+-\d+$")
 
 
@@ -94,14 +51,9 @@ def _version() -> str:
 
 
 def _atomic_write_h5ad(path: str | Path, adata: AnnData) -> None:
-    """Write `adata` to `path` atomically: a temp file, renamed over the target only on
-    success.
-
-    A fit can take hours to produce and an enrichment arm's results can take longer
-    still; a half-written h5ad after either is worse than none. This guarantee is small
-    enough to own outright, kept local rather than imported so the module carries no
-    dependency on where a deployment puts scratch space.
-    """
+    """Write `adata` to `path` atomically -- a temp file renamed over the target only
+    on success, so a long-running fit or enrichment sweep never leaves a half-written
+    h5ad behind."""
     path = Path(path)
     tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
     try:
@@ -120,25 +72,18 @@ def write_result(
     feature_loadings: pd.DataFrame | None = None,
     feature_loadings_path: str | Path | None = None,
 ) -> Path:
-    """Write `embed` to `path`, with `provenance` merged into ``uns["provenance"]``.
+    """Write `embed` to `path`, merging `provenance` into ``uns["provenance"]``.
 
     `feature_loadings`, if given, is a peaks x K frame (index = peak names, columns =
-    `embed.var_names`) written to its own companion h5ad -- a peaks x K matrix has
-    nowhere sensible to live on a cells x K object, and peaks routinely outnumber the
-    thing `embed` is optimised for opening quickly. Its path (default:
-    ``<path stem>.loadings.h5ad`` beside `path`) is recorded into
-    ``provenance["feature_loadings_path"]`` before the primary write, so
-    :func:`read_feature_loadings` can find it later.
-
-    Every entry of `feature_loadings`'s index must already be a canonical
-    ``chr:start-end`` peak name -- this is the one place that contract is enforced, so
-    nothing downstream needs to normalize a peak name again. A name that doesn't match
-    raises, naming the first few offenders, rather than silently writing an annotation
-    with no coordinates.
+    `embed.var_names`), written to a companion h5ad (default
+    ``<path stem>.loadings.h5ad``) and linked via
+    ``provenance["feature_loadings_path"]``. Every index entry must already be a
+    canonical ``chr:start-end`` peak name; a non-matching name raises, naming the
+    first few offenders.
     """
     path = Path(path)
     prov = dict(provenance)
-    prov.setdefault("written_at", datetime.now(timezone.utc).isoformat())
+    prov.setdefault("written_at", datetime.now(UTC).isoformat())
     prov.setdefault("scads_drvi_version", _version())
 
     if feature_loadings is not None:
@@ -180,13 +125,9 @@ def _write_feature_loadings(path: Path, frame: pd.DataFrame) -> None:
 def read_feature_loadings(
     path: str | Path, *, embed: AnnData | None = None, backed: str | bool | None = None
 ) -> AnnData:
-    """Read the companion peaks x K loadings file for the result at `path`.
-
-    Its location is resolved from ``uns["provenance"]["feature_loadings_path"]``. Pass
-    the already-loaded `embed` (from ``anndata.read_h5ad(path)``) to avoid a second open
-    of the primary file just to read that one field -- ``uns`` is always loaded eagerly,
-    even under ``backed=True``.
-    """
+    """Read the companion peaks x K loadings file for the result at `path`, resolved
+    from ``uns["provenance"]["feature_loadings_path"]``. Pass an already-loaded
+    `embed` to avoid re-opening `path` just for that field."""
     import anndata as ad
 
     path = Path(path)
@@ -219,20 +160,12 @@ def attach_enrich_results(
     factor_selection: pd.DataFrame | None = None,
     params: Mapping[str, Any] | None = None,
 ) -> None:
-    """Attach one enrichment arm's output into ``embed.uns["enrich"][model]``, in place.
-
-    `results` is the tidy per-trait table :func:`scads_drvi.enrich.ldsc.read_results`
-    builds: columns ``dim``, ``direction`` (``"pos"``/``"neg"``/``"combined"``),
-    ``trait``, the raw LDSC columns, and the derived ``p``/``q``. A caller filters
-    ``results.query("direction == 'pos' and trait == 'X'")`` to get one arm's view.
-
-    `factor_selection`, if given, is :func:`scads_drvi.enrich.config.select_factors`'s
-    output with its ``annot_index`` column dropped -- that numbering is a purely internal
-    detail of how annotation files were named for the LDSC subprocess, never a public
-    record. `params` is the arm's resolved annotation config, kept for audit.
-
-    Mutates `embed` in memory only; call :func:`write_result` afterwards to persist it.
-    """
+    """Attach one enrichment arm's output into ``embed.uns["enrich"][model]``, in
+    place. `results` is the tidy per-trait table
+    :func:`scads_drvi.enrich.ldsc.read_results` builds. `factor_selection` is
+    :func:`scads_drvi.enrich.config.select_factors`'s output with its internal
+    ``annot_index`` column dropped. `params` is the arm's resolved annotation config,
+    kept for audit. Call :func:`write_result` afterwards to persist."""
     arm: dict[str, Any] = {"results": results}
     if factor_selection is not None:
         keep = [c for c in factor_selection.columns if c != "annot_index"]
@@ -243,15 +176,8 @@ def attach_enrich_results(
 
 
 def directional_loadings(embed: AnnData, direction: str) -> pd.DataFrame:
-    """``relu(X)`` or ``relu(-X)``, as a cells x K frame -- the *only* place a pos/neg
-    split is ever materialized.
-
-    DRVI has no native notion of this split (its own ``directional=True`` machinery only
-    computes or plots things twice at call time; ``var`` always stays K rows). S-LDSC
-    genuinely needs one annotation per direction, so this view is derived fresh from the
-    canonical signed `embed.X` wherever that need actually arises, rather than being
-    persisted as separate ``dim_j/pos``/``dim_j/neg`` columns.
-    """
+    """``relu(X)`` or ``relu(-X)`` as a cells x K frame -- the only place a pos/neg
+    split is ever materialized, derived fresh from `embed.X` rather than persisted."""
     import numpy as np
     import pandas as pd
 
