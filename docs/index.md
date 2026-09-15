@@ -19,18 +19,17 @@ caller-supplied. Two tests enforce that rather than trusting it:
 
 ## What's in it
 
-A fit's results live in **one `AnnData`** (see `factorize.result`), shaped exactly the
+A fit's results live in **one `AnnData`** (see `enrich.embed`), shaped exactly the
 way DRVI's own interpretability functions expect it: `obs` = cells, `var` = one row per
-latent dimension. There is no separate path-configuration object — every function takes
-an explicit path, and a bare read is just `anndata.read_h5ad(path)`.
+latent dimension. There is no separate path-configuration object, and no wrapper around
+training or loading a model either — every function takes an explicit path, a bare
+read is just `anndata.read_h5ad(path)`, and training/loading uses `scvi.external.DRVI`
+directly (see Getting started).
 
 | module | role |
 |---|---|
-| `factorize.model` | load or **train** a fit, latent in requested row order, split responsibility |
-| `factorize.result` | `build_embed`, `write_result`, `attach_enrich_results`, `directional_loadings` |
-| `factorize.h5ad` | backed-CSR reads, cell gating by depth |
+| `enrich.embed` | `write_result`, `attach_enrich_results`, `directional_loadings` |
 | `stats` | one-tailed p, Benjamini–Hochberg, BH-boundary z |
-| `factorize.kernels` | interval kernels |
 | `enrich.binary` | the pinned Rust LDSC: resolve, verify, build safe commands |
 | `enrich.h2_output` | parse what `ldsc h2` prints |
 | `enrich.config` | enrichment config loading and factor selection |
@@ -53,13 +52,20 @@ pip install -e .
 ```
 
 ```python
-from scads_drvi.factorize.model import train_fit
+from scvi.external import DRVI
+import anndata as ad
+from scads_drvi.enrich.embed import write_result
 
-embed = train_fit(
-    adata, n_latent=96, obs_columns=["cell_type"],
-    result_path="my_fit.h5ad", model_dir="my_fit/model",
-)
+DRVI.setup_anndata(adata, batch_key="donor")
+model = DRVI(adata, n_latent=96)
+model.train(max_epochs=200)
+model.save("my_fit/model", overwrite=True)
+
+embed = ad.AnnData(model.get_latent_representation(adata), obs=adata.obs[["cell_type"]].copy())
+embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+model.set_latent_dimension_stats(embed)
 embed.obsm["X_umap"] = umap.UMAP().fit_transform(embed.X)   # set once computed, not read
+write_result("my_fit.h5ad", embed, provenance={"n_latent": 96})
 ```
 
 ```{toctree}

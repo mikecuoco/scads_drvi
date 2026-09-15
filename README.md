@@ -14,24 +14,23 @@ caller-supplied. Two tests enforce that rather than trusting it:
   keeping docstrings clean of them is a convention rather than something the scan checks.
 - `tests/test_portability.py` — builds a complete synthetic *plant* single-cell analysis
   (tissues, cultivars, agronomic traits — no shared vocabulary at all) and runs the whole
-  chain on it: obs → `build_embed`/`write_result` → factor selection → LDSC results →
-  `attach_enrich_results` → BH → per-cell scores → aggregation → seven figures. A scan
-  proves no forbidden *names*; this proves no hidden *assumptions*.
+  chain on it: obs → the cells x K embed → `write_result` → factor selection → LDSC
+  results → `attach_enrich_results` → BH → per-cell scores → aggregation → seven
+  figures. A scan proves no forbidden *names*; this proves no hidden *assumptions*.
 
 ## What's in it
 
-A fit's results live in **one `AnnData`** (`factorize.result`), shaped exactly the way
+A fit's results live in **one `AnnData`** (`enrich.embed`), shaped exactly the way
 DRVI's own interpretability functions expect it: `obs` = cells, `var` = one row per
-latent dimension. There is no path-configuration object — every function takes an
-explicit path, and a bare read is just `anndata.read_h5ad(path)`.
+latent dimension. There is no path-configuration object, and no wrapper around
+training or loading a model either — every function takes an explicit path, a bare
+read is just `anndata.read_h5ad(path)`, and training/loading uses `scvi.external.DRVI`
+directly.
 
 | module | role |
 |---|---|
-| `factorize.model` | load or **train** a fit, latent in requested row order, split responsibility |
-| `factorize.result` | `build_embed`, `write_result`, `attach_enrich_results`, `directional_loadings` |
-| `factorize.h5ad` | backed-CSR reads, cell gating by depth |
+| `enrich.embed` | `write_result`, `attach_enrich_results`, `directional_loadings` |
 | `stats` | one-tailed p, Benjamini–Hochberg, BH-boundary z |
-| `factorize.kernels` | interval kernels |
 | `enrich.binary` | the pinned Rust LDSC: resolve, verify, build safe commands |
 | `enrich.h2_output` | parse what `ldsc h2` prints |
 | `enrich.config` | enrichment config loading and factor selection |
@@ -73,28 +72,38 @@ pip install -e 'git+https://github.com/mikecuoco/scads_drvi@main#egg=scads-drvi'
 ## Getting started
 
 Every function takes an explicit path. A fit's results are one `AnnData`, built once and
-read back everywhere else with `anndata.read_h5ad` directly:
+read back everywhere else with `anndata.read_h5ad` directly. Training and loading a
+DRVI model is not wrapped by this package at all — call `scvi.external.DRVI` directly,
+same as [DRVI's own tutorial](https://drvi.readthedocs.io/latest/tutorials/external/general_pipeline.html):
 
 ```python
-from scads_drvi.factorize.model import train_fit
+from scvi.external import DRVI
+import anndata as ad
+from scads_drvi.enrich.embed import write_result
 
-embed = train_fit(
-    adata, n_latent=96, batch_key="donor", obs_columns=["cell_type"],
-    result_path="my_fit.h5ad", model_dir="my_fit/model",
-)
+DRVI.setup_anndata(adata, batch_key="donor")
+model = DRVI(adata, n_latent=96)
+model.train(max_epochs=200)
+model.save("my_fit/model", overwrite=True)
+
+embed = ad.AnnData(model.get_latent_representation(adata), obs=adata.obs[["cell_type"]].copy())
+embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+model.set_latent_dimension_stats(embed)
 embed.obsm["X_umap"] = umap.UMAP().fit_transform(embed.X)   # set once computed, not read
 embed.var["vanished"]      # DRVI's own per-dimension flag
+
+write_result("my_fit.h5ad", embed, provenance={"n_latent": 96, "batch_key": "donor"})
 ```
 
-`train_fit` trains, saves the checkpoint, and writes the result h5ad in one call. Given
-a checkpoint from elsewhere, `factorize.model.load_fit` and
-`factorize.result.build_embed`/`write_result` do the same, split across two calls.
+Loading a checkpoint back is the same `DRVI.load(model_dir, adata=adata)` call, with
+`adata` registered via the same `batch_key` the fit was trained with — nothing checks
+that for you, so get it from wherever you recorded it (e.g. your own `provenance` dict).
 
 ## Reading a finished run
 
 ```python
+from scads_drvi.enrich.embed import attach_enrich_results, directional_loadings
 from scads_drvi.enrich.ldsc import read_results
-from scads_drvi.factorize.result import attach_enrich_results, directional_loadings
 from scads_drvi.scores.cell import cs_from_z
 
 results = read_results(arm / "results", traits=["t1", "t2"], annot2dim=annot2dim)
@@ -127,10 +136,8 @@ lazily. Heavy dependencies are confined by directory:
 
 | module | needs |
 |---|---|
-| `factorize/model.py` | `torch`, `scvi-tools` (function-local) |
-| `factorize/result.py` | `anndata` (function-local) |
+| `enrich/embed.py` | `anndata` (function-local) |
 | `pl/` | `matplotlib`, `seaborn` (function-local) |
-| `factorize/h5ad.py` | `h5py` at module scope — it *is* the h5ad reader |
 | everything else | numpy / pandas / scipy / pyyaml |
 
 This is not cosmetic. The environment that runs the enrichment stages has no torch, no

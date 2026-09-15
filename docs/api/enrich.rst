@@ -17,6 +17,10 @@ scads\_drvi.enrich
    :members:
    :show-inheritance:
 
+.. automodule:: scads_drvi.enrich.embed
+   :members:
+   :show-inheritance:
+
 .. automodule:: scads_drvi.enrich.config
    :members:
    :show-inheritance:

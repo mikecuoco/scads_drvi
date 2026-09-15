@@ -7,7 +7,6 @@ API Reference
    :maxdepth: 1
 
    stats
-   factorize
    enrich
    scores
    pl

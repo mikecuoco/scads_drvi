@@ -107,7 +107,7 @@ class TestReadResults:
 
     def test_direction_can_be_a_mapping_per_annotation(self, arm):
         """This is how a caller records which sign of the latent dimension a result
-        came from -- see :func:`scads_drvi.factorize.result.directional_loadings`, which is
+        came from -- see :func:`scads_drvi.enrich.embed.directional_loadings`, which is
         where that split is actually derived and computed."""
         annot2dim, root = arm
         frame = read_results(

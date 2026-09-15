@@ -56,10 +56,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      # Dependencies are installed explicitly rather than via `pip install .` because
-      # pyproject declares torch and scvi-tools as hard requirements. Those are needed by
-      # factorize/ only; installing them here would add gigabytes to every job to exercise
-      # tests that are skipped anyway.
+      # Dependencies are installed explicitly rather than via `pip install .` -- this
+      # package's own hard dependencies are numpy/pandas/scipy/pyyaml/h5py/anndata/
+      # matplotlib/seaborn only. torch/scvi-tools/drvi-py live in the optional `drvi`
+      # extra (nothing in this package imports them; training/loading a DRVI model is
+      # the caller's own job against `scvi.external.DRVI` directly) and are never
+      # installed here.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

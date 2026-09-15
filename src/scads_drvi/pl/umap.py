@@ -11,7 +11,8 @@ something to compute.
 A per-factor grid over one embedding -- what this module used to call
 ``umap_factor_grid`` -- is now ``drvi.utils.pl.plot_latent_dims_in_umap(embed,
 directional=..., dim_subset=..., order_col="order")``, driven by the ``obsm["X_umap"]``
-and ``var`` columns :func:`scads_drvi.factorize.result.build_embed` already sets. Apply
+set once computed (see the getting-started guide) and the ``var`` columns
+``model.set_latent_dimension_stats`` writes directly onto the embed. Apply
 :func:`scads_drvi.pl.style.apply_style`/:func:`scads_drvi.pl.save.save_figure` to the
 figure it returns, same as any other figure here.
 """

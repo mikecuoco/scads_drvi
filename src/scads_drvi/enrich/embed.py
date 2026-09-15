@@ -1,12 +1,31 @@
 """One ``AnnData`` per fit -- the object this package reads and writes.
 
+This lives under ``enrich/`` rather than a separate package because it is this
+project's own data model for a fit's results, not a DRVI wrapper -- DRVI's own
+tutorial (https://drvi.readthedocs.io/latest/tutorials/external/general_pipeline.html)
+covers training, loading and getting a latent representation directly via
+``scvi.external.DRVI``; nothing here duplicates that. What's here has no DRVI
+equivalent at all: attaching an S-LDSC enrichment arm's results, deriving the
+pos/neg split S-LDSC needs, and safely writing/reading the object those live on.
+It is used right after training too, before any enrichment has happened -- re-homed
+under ``enrich/`` because it is the enrichment stage's data model, not because it is
+enrichment-only in when it gets called.
+
 Everything a fit produces -- the signed latent representation, DRVI's own per-dimension
 statistics, a UMAP embedding, per-cell disease scores and S-LDSC enrichment results --
 lives in one h5ad, shaped exactly the way DRVI's own interpretability API expects
 (``obs`` = cells, ``var`` = one row per latent dimension). That shape is deliberate:
 ``model.set_latent_dimension_stats``, ``drvi.utils.pl.plot_latent_dimension_stats``,
 ``plot_latent_dims_in_umap`` and ``plot_latent_dims_in_heatmap`` all take exactly this
-object, so nothing here has to adapt our data to theirs.
+object, so nothing here has to adapt our data to theirs. Building it is a handful of
+lines at the call site (see the getting-started guide), not a function here:
+
+    from scvi.external import DRVI
+    import anndata as ad
+
+    embed = ad.AnnData(model.get_latent_representation(adata), obs=adata.obs[cols].copy())
+    embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+    model.set_latent_dimension_stats(embed, vanished_threshold=0.5)
 
 **There is no persisted pos/neg split.** DRVI itself has none either -- its own
 ``directional=True`` machinery only computes or plots things twice at call time and
@@ -47,13 +66,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping
 
     import pandas as pd
     from anndata import AnnData
 
 __all__ = [
-    "build_embed",
     "write_result",
     "read_feature_loadings",
     "attach_enrich_results",
@@ -92,49 +110,6 @@ def _atomic_write_h5ad(path: str | Path, adata: AnnData) -> None:
     finally:
         with contextlib.suppress(FileNotFoundError):
             tmp.unlink()
-
-
-def build_embed(
-    model,
-    adata,
-    *,
-    obs_columns: Sequence[str] | None = None,
-    vanished_threshold: float = 0.5,
-) -> AnnData:
-    """The canonical cells x K object for one fit, in DRVI's own ``embed`` shape.
-
-    `obs_columns` is an explicit list of columns to carry over from `adata.obs` --
-    deliberately not "every column", since the raw obs h5ad routinely carries far more
-    than any one fit's downstream consumers need.
-
-    `var` is populated by DRVI's own ``model.set_latent_dimension_stats`` -- this
-    function does not reimplement vanished-dimension detection, ordering or titling.
-
-    A UMAP (or any other 2-D embedding) is set directly on the object once computed,
-    not passed in here::
-
-        embed = build_embed(model, adata, obs_columns=["cell_type"])
-        embed.obsm["X_umap"] = umap.UMAP(...).fit_transform(embed.X)
-        write_result(path, embed, provenance={...})
-
-    Setting it straight from `embed.X` is trivially aligned by construction -- there is
-    nothing to reindex or validate, unlike an embedding computed elsewhere and read back
-    from a file.
-    """
-    import anndata as ad
-    import numpy as np
-
-    from scads_drvi.factorize.model import latent
-
-    z = latent(model, adata=adata)
-    obs = adata.obs[list(obs_columns)].copy() if obs_columns is not None else adata.obs.iloc[:, :0].copy()
-
-    embed = ad.AnnData(X=np.asarray(z, dtype=np.float32), obs=obs)
-    embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
-
-    model.set_latent_dimension_stats(embed, vanished_threshold=vanished_threshold)
-
-    return embed
 
 
 def write_result(

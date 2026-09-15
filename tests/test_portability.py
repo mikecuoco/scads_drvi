@@ -7,7 +7,7 @@ seven regions are called something.
 
 So this builds a complete synthetic analysis from scratch -- a plant single-cell
 experiment, with tissues, cultivars and agronomic traits -- and runs it end to end:
-h5ad obs -> build_embed -> write_result -> factor selection -> LDSC results ->
+h5ad obs -> the cells x K embed -> write_result -> factor selection -> LDSC results ->
 attach_enrich_results -> BH -> per-cell scores -> aggregation -> figures. Nothing here
 is renamed from the real analysis; the point is that no name matches.
 
@@ -31,13 +31,12 @@ from scads_drvi.enrich.config import (  # noqa: E402
     latent_stats_from_embed,
     select_factors,
 )
-from scads_drvi.enrich.ldsc import read_results  # noqa: E402
-from scads_drvi.factorize.result import (  # noqa: E402
+from scads_drvi.enrich.embed import (  # noqa: E402
     attach_enrich_results,
-    build_embed,
     directional_loadings,
     write_result,
 )
+from scads_drvi.enrich.ldsc import read_results  # noqa: E402
 from scads_drvi.pl.enrichment import (  # noqa: E402
     covariate_audit,
     grouped_landscape,
@@ -74,8 +73,8 @@ ARM = "assembly_v3_topfrac"
 
 
 class _FakeModel:
-    """Stands in for a trained ``scvi.external.DRVI``: only the two methods
-    build_embed needs -- ``get_latent_representation`` and DRVI's own
+    """Stands in for a trained ``scvi.external.DRVI``: only the two methods the
+    cells x K embed construction needs -- ``get_latent_representation`` and DRVI's own
     ``set_latent_dimension_stats``, driven by a fixed signed latent matrix and a fixed
     kept/vanished split, so the rest of this test can exercise the real pipeline
     functions against it."""
@@ -134,7 +133,7 @@ def analysis(tmp_path_factory):
     obs_path = root / "matrix.h5ad"
     ad.AnnData(X=np.zeros((N_CELLS, 1), dtype=np.float32), obs=obs_df).write_h5ad(obs_path)
 
-    # -- build_embed: obs h5ad + a trained model -> the canonical cells x K object ----
+    # -- obs h5ad + a trained model -> the canonical cells x K object -----------------
     raw = ad.read_h5ad(obs_path)
     with np.errstate(divide="ignore", invalid="ignore"):
         raw.obs["peak_fraction"] = np.where(
@@ -146,13 +145,14 @@ def analysis(tmp_path_factory):
     vanished = np.array([False] * N_KEPT + [True] * (N_FACTORS - N_KEPT))
     model = _FakeModel(z, vanished)
 
-    embed = build_embed(
-        model,
-        raw,
-        obs_columns=[
-            "fine_type", "tissue", "cultivar", "lineage", "total_reads", "peak_fraction",
-        ],
+    obs_columns = [
+        "fine_type", "tissue", "cultivar", "lineage", "total_reads", "peak_fraction",
+    ]
+    embed = ad.AnnData(
+        X=model.get_latent_representation(raw), obs=raw.obs[obs_columns].copy()
     )
+    embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+    model.set_latent_dimension_stats(embed)
     # A UMAP is set directly from the embed once computed -- no read/reindex step.
     embed.obsm["X_umap"] = rng.normal(size=(N_CELLS, 2)).astype(np.float32)
 
