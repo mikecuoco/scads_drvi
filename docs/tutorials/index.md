@@ -14,16 +14,16 @@ peaks × cells (10x PBMC scATAC)
                        result h5ad
         │
         ▼
-  Enrich            ── annotate peaks, run S-LDSC, attach_enrich_results,
+  Enrich            ── annotate peaks, run S-LDSC, attach results into uns["enrich"],
                        plot the heritability landscape
         │
         ▼
   Cell scores       ── cs_from_z, group summaries, group matrix, figures throughout
 ```
 
-Every function above takes an explicit path; a fit's results live in one `AnnData`
-(see `enrich.embed`) rather than a directory tree a configuration object derives
-paths into.
+Every function above takes an explicit path; a fit's results live in one `AnnData`,
+built and written with plain `anndata` calls at the call site, rather than a directory
+tree a configuration object derives paths into.
 
 ```{toctree}
 :maxdepth: 1

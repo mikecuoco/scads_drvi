@@ -14,35 +14,40 @@ caller-supplied. Two tests enforce that rather than trusting it:
   keeping docstrings clean of them is a convention rather than something the scan checks.
 - `tests/test_portability.py` — builds a complete synthetic *plant* single-cell analysis
   (tissues, cultivars, agronomic traits — no shared vocabulary at all) and runs the whole
-  chain on it: obs → the cells x K embed → `write_result` → factor selection → LDSC
-  results → `attach_enrich_results` → BH → per-cell scores → aggregation → seven
+  chain on it: obs → the cells x K embed → written to h5ad → factor selection → LDSC
+  results → attached into `uns["enrich"]` → BH → per-cell scores → aggregation → ten
   figures. A scan proves no forbidden *names*; this proves no hidden *assumptions*.
 
 ## What's in it
 
-A fit's results live in **one `AnnData`** (`enrich.embed`), shaped exactly the way
-DRVI's own interpretability functions expect it: `obs` = cells, `var` = one row per
-latent dimension. There is no path-configuration object, and no wrapper around
-training or loading a model either — every function takes an explicit path, a bare
-read is just `anndata.read_h5ad(path)`, and training/loading uses `scvi.external.DRVI`
-directly.
+A fit's results live in **one `AnnData`**, shaped exactly the way DRVI's own
+interpretability functions expect it: `obs` = cells, `var` = one row per latent
+dimension. There is no path-configuration object, and no wrapper around training,
+loading a model, or reading/writing the result h5ad either — every function takes an
+explicit path, a bare read is just `anndata.read_h5ad(path)`, a write is
+`AnnData.write_h5ad(path)`, and training/loading uses `scvi.external.DRVI` directly.
 
 | module | role |
 |---|---|
-| `enrich.embed` | `write_result`, `attach_enrich_results`, `directional_loadings` |
 | `stats` | one-tailed p, Benjamini–Hochberg, BH-boundary z |
 | `enrich.binary` | the pinned Rust LDSC: resolve, verify, build safe commands |
 | `enrich.h2_output` | parse what `ldsc h2` prints |
 | `enrich.config` | enrichment config loading and factor selection |
 | `enrich.ldsc` | read `.results` files into one tidy `dim`/`direction`/`trait` table |
 | `scores.cell` / `.aggregate` | the two `CS_i` formulas; group summaries and matrices |
-| `pl.*` | style, colour policy, frugal boxes, and the figures with no DRVI equivalent |
+| `pl.*` | style, colour policy, frugal boxes, and every figure -- including its own in-house per-dimension UMAP grid, stats plot and category heatmap |
 
-Where DRVI's own package (`drvi-py`) already computes something — per-dimension
-vanished/order/title stats, a per-factor UMAP grid, a factor-value-by-category heatmap,
-factor↔covariate association scores — this package calls `drvi.utils.pl.*` /
-`drvi.utils.metrics.*` / the model's own `set_latent_dimension_stats` directly instead of
-reimplementing it.
+Where DRVI's own package (`drvi-py`) already computes something -- per-dimension
+vanished/order/title stats, factor↔covariate association scores -- this package calls
+`model.set_latent_dimension_stats` / `drvi.utils.metrics.*` directly instead of
+reimplementing it. Plotting is the one place this used to extend to `drvi.utils.pl.*`
+too; it no longer does -- `pl.umap.latent_umap_grid` and
+`pl.factors.latent_dimension_stats`/`latent_heatmap` wrap `scanpy.pl.embedding`/
+`seaborn.heatmap` directly with this project's own colour/style policy, so no `drvi-py`
+install is needed just to draw a figure. A plain categorical or continuous embedding
+scatter needs no wrapper at all -- `sc.pl.embedding(embed, basis="umap", color=...)` is
+already the whole call. (`scanpy` is accordingly now a hard dependency, and the floor is
+Python 3.12 / numpy 2 / pandas 2.3 -- scanpy's own floor.)
 
 ## Where it came from
 
@@ -79,7 +84,6 @@ same as [DRVI's own tutorial](https://drvi.readthedocs.io/latest/tutorials/exter
 ```python
 from scvi.external import DRVI
 import anndata as ad
-from scads_drvi.enrich.embed import write_result
 
 DRVI.setup_anndata(adata, batch_key="donor")
 model = DRVI(adata, n_latent=96)
@@ -92,7 +96,8 @@ model.set_latent_dimension_stats(embed)
 embed.obsm["X_umap"] = umap.UMAP().fit_transform(embed.X)   # set once computed, not read
 embed.var["vanished"]      # DRVI's own per-dimension flag
 
-write_result("my_fit.h5ad", embed, provenance={"n_latent": 96, "batch_key": "donor"})
+embed.uns["provenance"] = {"n_latent": 96, "batch_key": "donor"}
+embed.write_h5ad("my_fit.h5ad")
 ```
 
 Loading a checkpoint back is the same `DRVI.load(model_dir, adata=adata)` call, with
@@ -102,15 +107,22 @@ that for you, so get it from wherever you recorded it (e.g. your own `provenance
 ## Reading a finished run
 
 ```python
-from scads_drvi.enrich.embed import attach_enrich_results, directional_loadings
+import numpy as np
+import pandas as pd
+
 from scads_drvi.enrich.ldsc import read_results
 from scads_drvi.scores.cell import cs_from_z
 
 results = read_results(arm / "results", traits=["t1", "t2"], annot2dim=annot2dim)
-attach_enrich_results(embed, "my_arm", results, factor_selection=fmap)
+embed.uns.setdefault("enrich", {})["my_arm"] = {
+    "results": results,
+    "factor_selection": fmap.drop(columns="annot_index"),
+}
 
-loadings = directional_loadings(embed, "pos")[keep]   # the ONLY place a pos/neg split
-                                                        # is ever materialized
+# relu(X) -- the ONLY place a pos/neg split is ever materialized, derived on demand
+loadings = pd.DataFrame(
+    np.clip(embed.X, 0, None), index=embed.obs_names, columns=embed.var_names
+)[keep]
 scores = cs_from_z(loadings, results.query("trait == 't1'"), model="my_arm", trait="t1")
 
 scores.null       # 0.0 -- read this, never hardcode it beside an axis
@@ -136,14 +148,15 @@ lazily. Heavy dependencies are confined by directory:
 
 | module | needs |
 |---|---|
-| `enrich/embed.py` | `anndata` (function-local) |
-| `pl/` | `matplotlib`, `seaborn` (function-local) |
+| `pl/` | `matplotlib`, `seaborn`, `scanpy` (→ `anndata`), function-local |
 | everything else | numpy / pandas / scipy / pyyaml |
 
 This is not cosmetic. The environment that runs the enrichment stages has no torch, no
 scvi, no drvi, no matplotlib, no seaborn, no h5py and no anndata, and must still be able
-to import and use the loaders, statistics and scoring. `tests/test_import_surface.py`
-checks it in a subprocess with those modules blocked.
+to import and use the loaders, statistics and scoring -- a result h5ad's own I/O is a
+plain `anndata.read_h5ad`/`AnnData.write_h5ad` call at the caller's own site, not
+something this package wraps. `tests/test_import_surface.py` checks it in a subprocess
+with those modules blocked.
 
 ## Tests
 
@@ -153,9 +166,10 @@ pytest
 
 CI runs it on three dependency stacks (`.github/workflows/tests.yml`), mirroring the three
 environments the package is deployed into: numpy 2 / pandas 3 with no optional
-dependencies at all, the declared floors (numpy 1.26 / pandas 2.1), and a current stack
-with h5py and plotting. That is not belt-and-braces — it is how two real bugs were found,
-each of which passed in one stack and failed in another.
+dependencies at all, the declared floors (Python 3.12 / numpy 2 / pandas 2.3 -- scanpy's
+own floor, since `pl.*` now wraps `scanpy.pl.embedding` for every embedding figure), and a
+current stack with h5py and plotting. That is not belt-and-braces — it is how two real
+bugs were found, each of which passed in one stack and failed in another.
 
 **If you vendor this package next to another test suite, collect the two separately.** In
 the capsule it came from, the sibling `conftest.py` inserts seven directories onto

@@ -1,74 +1,47 @@
 """Embedding scatters.
 
-Every function takes a tidy frame and returns ``(fig, ax)``. None of them touches a path
-or a global, so a caller can compose them and a test can assert on them.
+A plain categorical or continuous scatter -- `sc.pl.embedding(embed, basis="umap",
+color="cell_type")`, or `color="score"` with `cmap=`/`vmin=`/`vmax=` (scanpy accepts
+percentile strings directly, e.g. ``vmin="p1"``) -- already does everything such a plot
+needs: point sizing by cell count, a stable per-category palette or a colorbar, a
+legend. Call scanpy directly; this module does not wrap it a second time. What earns a
+wrapper here is a grid of one panel per latent dimension (:func:`latent_umap_grid`),
+which scanpy's own `color=` API does not give you for free: per-panel titles/limits and
+a directional +/- split (``relu(x)``/``relu(-x)``) assembled from one
+``sc.pl.embedding`` call, under this project's own robust percentile limits
+(:func:`scads_drvi.pl.color.percentile_bounds`).
 
-Point size is derived from the point count rather than typed. The code this replaces used
-``s=5`` in one place and ``s=0.10`` in another -- a 50x difference that is a consequence
-of drawing 60,000 points versus 1.26 million, not a stylistic choice, and therefore
-something to compute.
-
-A per-factor grid over one embedding -- what this module used to call
-``umap_factor_grid`` -- is now ``drvi.utils.pl.plot_latent_dims_in_umap(embed,
-directional=..., dim_subset=..., order_col="order")``, driven by the ``obsm["X_umap"]``
-set once computed (see the getting-started guide) and the ``var`` columns
-``model.set_latent_dimension_stats`` writes directly onto the embed. Apply
+:func:`latent_umap_grid` takes the ``embed`` ``AnnData`` directly (``obs`` = cells, a
+named ``obsm`` basis, ``var`` = one row per latent dimension), the same convention
+``scvi``/``drvi-py`` already use for this object, rather than a plain x/y frame: unlike
+the rest of :mod:`scads_drvi.pl`, it needs ``anndata``'s aligned fancy-indexing to
+subsample cells and keep ``obs``/``obsm`` in sync, so there is no benefit to decomposing
+to a frame first only to reassemble it for scanpy. Apply
 :func:`scads_drvi.pl.style.apply_style`/:func:`scads_drvi.pl.save.save_figure` to the
-figure it returns, same as any other figure here.
+figure it returns, same as any other figure in this package.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
-    from matplotlib.axes import Axes
+    from anndata import AnnData
     from matplotlib.figure import Figure
 
 __all__ = [
     "SUBSAMPLE_DEFAULT",
     "SUBSAMPLE_SEED",
-    "point_style",
     "subsample",
-    "bare",
-    "umap_categorical",
-    "umap_continuous",
+    "latent_umap_grid",
 ]
 
 SUBSAMPLE_DEFAULT = 60_000
 SUBSAMPLE_SEED = 42
-
-
-def point_style(n: int) -> dict:
-    """Marker properties for a scatter of `n` points.
-
-    Size falls as the count rises, so a 60k panel and a 1.2M panel both read. Always
-    rasterised: a vector scatter of a million points produces a PDF no viewer will open.
-    """
-    if n <= 0:
-        raise ValueError("n must be positive")
-    if n <= 2_000:
-        size = 12.0
-    elif n <= 20_000:
-        size = 6.0
-    elif n <= 100_000:
-        size = 3.0
-    elif n <= 500_000:
-        size = 1.0
-    else:
-        size = 0.3
-    alpha = 0.9 if n <= 20_000 else (0.6 if n <= 200_000 else 0.35)
-    return {
-        "s": size,
-        "alpha": alpha,
-        "linewidths": 0.0,
-        "edgecolors": "none",
-        "rasterized": True,
-    }
 
 
 def subsample(
@@ -109,144 +82,112 @@ def subsample(
     return pd.concat(parts)
 
 
-def bare(ax: Axes) -> None:
-    """Strip ticks and spines, for a panel whose axes carry no units."""
-    ax.set_xticks([])
-    ax.set_yticks([])
-    for spine in ax.spines.values():
-        spine.set_visible(False)
+def _subsample_embed(embed: AnnData, n: int | None, *, seed: int = SUBSAMPLE_SEED) -> AnnData:
+    """`subsample`'s reproducible row selection, applied to an ``AnnData``'s ``obs``.
 
+    Returns a **copy**, not a view: every caller here goes on to write a temporary
+    ``obs`` column (a directional ReLU split, a masked continuous value) onto the
+    result, and mutating a view would silently write through to the caller's `embed`.
 
-def _coords(frame: pd.DataFrame, x: str | None, y: str | None) -> tuple[str, str]:
-    if x is not None and y is not None:
-        for name in (x, y):
-            if name not in frame.columns:
-                raise KeyError(f"{name!r} is not a column of the frame")
-        return x, y
-    from pandas.api.types import is_numeric_dtype
-
-    # is_numeric_dtype, not np.issubdtype: from pandas 3.0 a text column is a
-    # StringDtype extension dtype, and np.issubdtype raises TypeError on it rather than
-    # returning False -- so the numpy spelling turns "this column is not a coordinate"
-    # into a crash.
-    numeric = [c for c in frame.columns if is_numeric_dtype(frame[c])]
-    if len(numeric) < 2:
-        raise ValueError(
-            "cannot find two numeric coordinate columns; name them with x= and y="
-        )
-    return numeric[0], numeric[1]
-
-
-def umap_categorical(
-    frame: pd.DataFrame,
-    hue: str,
-    *,
-    ax: Axes | None = None,
-    x: str | None = None,
-    y: str | None = None,
-    palette: Mapping[str, str] | None = None,
-    order: Sequence[str] | None = None,
-    legend: str = "right",
-    n: int | None = SUBSAMPLE_DEFAULT,
-) -> tuple[Figure, Axes]:
-    """Scatter an embedding coloured by a categorical column.
-
-    The palette is built from the **full** category list before subsampling, so the same
-    category is the same colour in every panel of a figure.
+    A plain categorical/continuous scatter needs none of this -- ``sc.pl.embedding``
+    (or ``sc.pl.umap``) already handles point sizing, a stable per-category palette and
+    a colorbar on its own; call it directly rather than through a wrapper here.
     """
-    import matplotlib.pyplot as plt
-
-    from scads_drvi.pl.color import categorical_palette
-
-    if hue not in frame.columns:
-        raise KeyError(f"{hue!r} is not a column of the frame")
-    xcol, ycol = _coords(frame, x, y)
-
-    categories = order or sorted(frame[hue].astype(str).unique())
-    palette = palette or categorical_palette(categories)
-
-    plotted = subsample(frame, n, stratify=hue) if n else frame
-    fig, ax = (ax.figure, ax) if ax is not None else plt.subplots()
-    style = point_style(len(plotted))
-
-    for category in categories:
-        block = plotted[plotted[hue].astype(str) == str(category)]
-        if block.empty:
-            continue
-        ax.scatter(
-            block[xcol], block[ycol],
-            color=palette.get(str(category), "#949494"),
-            label=str(category), **style,
-        )
-
-    ax.set_xlabel(xcol)
-    ax.set_ylabel(ycol)
-    if legend == "right":
-        ax.legend(
-            loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False,
-            markerscale=4.0, handletextpad=0.3,
-        )
-    elif legend == "inside":
-        ax.legend(frameon=False, markerscale=4.0)
-    return fig, ax
+    if n is None:
+        return embed.copy()
+    positions = subsample(embed.obs.reset_index(drop=True), n, seed=seed).index.to_numpy()
+    return embed[positions].copy()
 
 
-def umap_continuous(
-    frame: pd.DataFrame,
-    value: str,
+def latent_umap_grid(
+    embed: AnnData,
     *,
-    ax: Axes | None = None,
-    x: str | None = None,
-    y: str | None = None,
-    cmap: str = "viridis",
-    norm=None,
+    dim_subset: Sequence[str] | None = None,
+    directional: bool = False,
+    remove_vanished: bool = True,
+    order_col: str = "order",
+    title_col: str = "title",
+    ncols: int = 5,
+    cmap: str = "RdBu_r",
+    directional_cmap: str = "viridis",
     percentiles: tuple[float, float] | None = None,
-    zero_as_background: bool = False,
-    colorbar: bool = True,
-    colorbar_label: str | None = None,
     n: int | None = SUBSAMPLE_DEFAULT,
-) -> tuple[Figure, Axes]:
-    """Scatter an embedding coloured by a continuous column, under robust limits.
+    seed: int = SUBSAMPLE_SEED,
+    **kwargs,
+) -> Figure:
+    """One embedding panel per latent dimension, in this project's own style.
 
-    `zero_as_background` draws exact zeros in grey underneath and sets the colour scale
-    on the non-zero values. Loadings are ReLU output, so a large fraction are exactly
-    zero; including them in the scale wastes most of the ramp on a spike at zero.
+    Replaces ``drvi.utils.pl.plot_latent_dims_in_umap``. `directional=True` doubles
+    every kept dimension into a ``+``/``-`` panel (``relu(x)``/``relu(-x)``, computed
+    inline as temporary ``obs`` columns -- a one-line clip on a column already in hand,
+    not a reason for a dedicated helper). Those panels use `directional_cmap`
+    (one-sided, since a ReLU output is non-negative) rather than the diverging `cmap`
+    the signed panels use.
+
+    One ``sc.pl.embedding`` call draws the whole grid (`color=` takes the full list of
+    panel names, with a matching `vmin`/`vmax` per panel), so panel layout, spacing and
+    per-panel colorbars all come from scanpy rather than being rebuilt here.
     """
-    import matplotlib.pyplot as plt
+    import scanpy as sc
 
-    from scads_drvi.pl.color import ROBUST_LIMITS, robust_norm
+    from scads_drvi.pl.color import ROBUST_LIMITS, percentile_bounds
 
-    if value not in frame.columns:
-        raise KeyError(f"{value!r} is not a column of the frame")
-    xcol, ycol = _coords(frame, x, y)
+    for column in (order_col, title_col):
+        if column not in embed.var.columns:
+            raise KeyError(f"{column!r} is not a column of embed.var")
+    if remove_vanished and "vanished" not in embed.var.columns:
+        raise KeyError('"vanished" is not a column of embed.var')
 
-    plotted = subsample(frame, n) if n else frame
-    fig, ax = (ax.figure, ax) if ax is not None else plt.subplots()
+    dim_stats = embed.var
+    if remove_vanished:
+        dim_stats = dim_stats.loc[~dim_stats["vanished"].astype(bool)]
+    dim_stats = dim_stats.sort_values(order_col)
 
-    values = plotted[value].to_numpy(dtype=float)
-    if norm is None:
-        norm = robust_norm(
-            values,
-            percentiles=percentiles or ROBUST_LIMITS,
-            nonzero_only=zero_as_background,
-        )
+    if dim_subset is not None:
+        missing = [d for d in dim_subset if d not in dim_stats.index]
+        if missing:
+            raise KeyError(f"dim_subset names dims not present (after filtering): {missing}")
+        dim_stats = dim_stats.loc[list(dim_subset)]
+    dims = list(dim_stats.index)
+    if not dims:
+        raise ValueError("no latent dimensions to plot after filtering")
 
-    style = point_style(len(plotted))
-    if zero_as_background:
-        zero = values == 0
-        if zero.any():
-            ax.scatter(
-                plotted[xcol][zero], plotted[ycol][zero],
-                color="#E6E6E6", zorder=1, **style,
-            )
-        plotted, values = plotted[~zero], values[~zero]
+    plotted = _subsample_embed(embed, n, seed=seed)
+    values = plotted[:, dims].X
+    values = np.asarray(values.toarray() if hasattr(values, "toarray") else values, dtype=float)
 
-    mappable = ax.scatter(
-        plotted[xcol], plotted[ycol], c=values, cmap=cmap, norm=norm, zorder=2, **style
+    vmin_default, vmax_default = percentile_bounds(percentiles or ROBUST_LIMITS)
+    panels: list[str] = []
+    cmaps: list[str] = []
+    vmins: list = []
+    vmaxs: list = []
+    titles: list[str] = []
+
+    for j, dim in enumerate(dims):
+        title = str(dim_stats.loc[dim, title_col])
+        if directional:
+            pos, neg = f"{dim}__pos", f"{dim}__neg"
+            plotted.obs[pos] = np.clip(values[:, j], 0, None)
+            plotted.obs[neg] = np.clip(-values[:, j], 0, None)
+            panels += [pos, neg]
+            cmaps += [directional_cmap, directional_cmap]
+            vmins += ["p0", "p0"]
+            vmaxs += [vmax_default, vmax_default]
+            titles += [f"{title}+", f"{title}-"]
+        else:
+            plotted.obs[dim] = values[:, j]
+            panels.append(dim)
+            cmaps.append(cmap)
+            vmins.append(vmin_default)
+            vmaxs.append(vmax_default)
+            titles.append(title)
+
+    # sc.pl.embedding takes one `cmap=`, not one per panel -- every panel here shares
+    # `cmap` (non-directional) or `directional_cmap` (directional), never a mix, so this
+    # is safe; a future per-panel-cmap need would have to draw panels individually.
+    fig = sc.pl.embedding(
+        plotted, basis="umap", color=panels, cmap=cmaps[0], vmin=vmins, vmax=vmaxs,
+        vcenter=0 if not directional else None, title=titles, ncols=ncols,
+        show=False, return_fig=True, **kwargs,
     )
-    ax.set_xlabel(xcol)
-    ax.set_ylabel(ycol)
-    if colorbar:
-        bar = fig.colorbar(mappable, ax=ax, pad=0.02, fraction=0.045)
-        bar.set_label(colorbar_label or value)
-    return fig, ax
+    return fig

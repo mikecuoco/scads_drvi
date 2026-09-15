@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -42,7 +42,7 @@ __all__ = [
 ]
 
 
-class ScoreKind(str, Enum):
+class ScoreKind(StrEnum):
     """Which formula produced a score column. Determines its null and its label."""
 
     Z_WEIGHTED = "z_weighted"
@@ -145,9 +145,10 @@ def cs_from_z(
 ) -> CellScores:
     """``cs_i = sum_k L_ik * max(0, z_k)`` -- the interpretation notebooks' score.
 
-    `loadings` is cells x factors -- for a directional score, pass
-    :func:`scads_drvi.enrich.embed.directional_loadings`'s output. Only the factors present
-    in `results` are used, in the order `results` gives them; when `results` carries a
+    `loadings` is cells x factors -- for a directional score, pass a ReLU'd view of
+    `embed.X` (``np.clip(embed.X, 0, None)`` for positive, ``np.clip(-embed.X, 0, None)``
+    for negative). Only the factors present in `results` are used, in the order
+    `results` gives them; when `results` carries a
     ``direction`` column, filter it to one direction before calling this (e.g.
     ``results.query("direction == 'pos'")``) so the weights line up with a `loadings`
     that was ReLU'd the same way.

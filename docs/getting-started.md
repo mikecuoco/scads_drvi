@@ -37,12 +37,12 @@ path-configuration object — every function takes an explicit path.
 This package does not wrap training or loading a DRVI model at all: call
 `scvi.external.DRVI` directly, the same way
 [DRVI's own tutorial](https://drvi.readthedocs.io/latest/tutorials/external/general_pipeline.html)
-does, and hand the result to `write_result`:
+does, and write the result with a plain `AnnData.write_h5ad` call -- there is no h5ad
+wrapper here either:
 
 ```python
 from scvi.external import DRVI
 import anndata as ad
-from scads_drvi.enrich.embed import write_result
 
 DRVI.setup_anndata(adata, batch_key="donor")
 model = DRVI(adata, n_latent=96)
@@ -57,15 +57,17 @@ embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
 model.set_latent_dimension_stats(embed)   # vanished, order, title, and friends
 embed.obsm["X_umap"] = umap.UMAP().fit_transform(embed.X)   # set once computed, not read
 
-write_result(
-    "my_fit.h5ad", embed,
-    provenance={"n_latent": 96, "batch_key": "donor", "model_dir": "my_fit/model"},
-)
+embed.uns["provenance"] = {"n_latent": 96, "batch_key": "donor", "model_dir": "my_fit/model"}
+embed.write_h5ad("my_fit.h5ad")
 ```
 
 `embed.var` is populated by DRVI's own per-dimension statistics
 (`model.set_latent_dimension_stats`), so `embed` is immediately usable with
-`drvi.utils.pl.*` and `drvi.utils.metrics.*`.
+`drvi.utils.metrics.*`, with a plain scanpy embedding scatter
+(`sc.pl.embedding(embed, basis="umap", color=...)`), and with this package's own
+in-house plotting -- `scads_drvi.pl.umap.latent_umap_grid` and
+`scads_drvi.pl.factors.latent_dimension_stats`/`latent_heatmap` -- which wrap
+`scanpy.pl.embedding`/`seaborn.heatmap` directly and need no `drvi-py` install.
 
 Loading a checkpoint back is the same `DRVI.load` call DRVI's own tutorial shows —
 register `adata` with the **same** `batch_key` the fit was trained with (nothing checks
@@ -74,7 +76,6 @@ this for you; get it from wherever you recorded it, e.g. your own `provenance` d
 ```python
 from scvi.external import DRVI
 import anndata as ad
-from scads_drvi.enrich.embed import write_result
 
 DRVI.setup_anndata(adata, batch_key="donor")
 model = DRVI.load("my_fit/model", adata=adata)
@@ -85,7 +86,8 @@ embed = ad.AnnData(
 )
 embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
 model.set_latent_dimension_stats(embed)
-write_result("my_fit.h5ad", embed, provenance={"n_latent": 96, "batch_key": "donor"})
+embed.uns["provenance"] = {"n_latent": 96, "batch_key": "donor"}
+embed.write_h5ad("my_fit.h5ad")
 ```
 
 ## Reading a finished run
@@ -107,7 +109,6 @@ derived on demand, see below):
 
 ```python
 from scads_drvi.enrich.config import kept_dims, latent_stats_from_embed, select_factors
-from scads_drvi.enrich.embed import attach_enrich_results, write_result
 from scads_drvi.enrich.ldsc import read_results
 
 stats = latent_stats_from_embed(embed)
@@ -116,8 +117,11 @@ keep = kept_dims(fmap)                       # dims that survive vanished-filter
 annot2dim = {f"k{i + 1}": dim for i, dim in enumerate(keep)}
 
 results = read_results(results_root, traits=("trait_a", "trait_b"), annot2dim=annot2dim)
-attach_enrich_results(embed, "my_arm", results, factor_selection=fmap)
-write_result("my_fit.h5ad", embed, provenance=embed.uns["provenance"])
+embed.uns.setdefault("enrich", {})["my_arm"] = {
+    "results": results,
+    "factor_selection": fmap.drop(columns="annot_index"),
+}
+embed.write_h5ad("my_fit.h5ad")
 
 arm = embed.uns["enrich"]["my_arm"]
 arm["results"].query("direction == 'pos' and trait == 'trait_a'")
@@ -126,12 +130,16 @@ arm["results"].query("direction == 'pos' and trait == 'trait_a'")
 ## Computing cell scores
 
 ```python
-from scads_drvi.enrich.embed import directional_loadings
+import numpy as np
+import pandas as pd
+
 from scads_drvi.scores.cell import cs_from_z
 
 primary = arm["results"].loc[arm["results"]["trait"] == "trait_a"]
-loadings = directional_loadings(embed, "pos")[keep]   # relu(X), the ONLY place a
-                                                        # pos/neg split is materialized
+# relu(X) -- the ONLY place a pos/neg split is ever materialized, derived on demand
+loadings = pd.DataFrame(
+    np.clip(embed.X, 0, None), index=embed.obs_names, columns=embed.var_names
+)[keep]
 scores = cs_from_z(loadings, primary, model="my_arm", trait="trait_a")
 
 scores.null    # 0.0  — read this; never hardcode it beside an axis
@@ -145,13 +153,13 @@ are confined by directory and imported inside functions:
 
 | module | needs |
 |---|---|
-| `enrich/embed.py` | `anndata` (function-local) |
-| `pl/` | `matplotlib`, `seaborn` (function-local) |
+| `pl/` | `matplotlib`, `seaborn`, `scanpy` (→ `anndata`), function-local |
 | everything else | `numpy` / `pandas` / `scipy` / `pyyaml` |
 
 This matters because the environment that runs enrichment stages has no torch, scvi,
 drvi, matplotlib, seaborn, h5py or anndata, and must still import and use the loaders,
-statistics, and scoring.
+statistics, and scoring. A result h5ad's own I/O is a plain `anndata.read_h5ad`/
+`AnnData.write_h5ad` call at the caller's own site -- there is no wrapper for it here.
 
 ## Running the tests
 

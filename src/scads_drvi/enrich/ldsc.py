@@ -58,9 +58,9 @@ def read_results(
 
     `direction` records which sign of the latent dimension each result came from --
     ``"combined"`` when the arm was not run per-direction, or a mapping from annotation
-    name to ``"pos"``/``"neg"`` when it was (see
-    :func:`scads_drvi.enrich.embed.directional_loadings`, which is where a pos/neg loadings
-    view is built; this function only records which one a result file came from). This
+    name to ``"pos"``/``"neg"`` when it was (a pos/neg loadings view is built with
+    ``np.clip(embed.X, 0, None)``/``np.clip(-embed.X, 0, None)``; this function only
+    records which one a result file came from). This
     ``dim``/``direction`` pair is what replaces the old split contract's
     ``half_map.tsv`` and three-name label system: a caller filters
     ``results.query("direction == 'pos' and trait == 'X'")`` instead of resolving an
