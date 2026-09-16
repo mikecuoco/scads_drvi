@@ -130,38 +130,6 @@ class TestCsFromZ:
         with pytest.raises(TypeError, match="cells x factors"):
             cs_from_z(np.zeros((3, 4)), results, model="m", trait="t")
 
-    def test_labels_veto_a_display_name(self, loadings, tmp_path):
-        """If a caller hands in display labels, the score must not be computed on
-        whatever columns happen to match."""
-        from scads_drvi.labels import load_labels
-
-        fm = tmp_path / "fm.tsv"
-        pd.DataFrame(
-            {
-                "dim": ["dim_0", "dim_1"],
-                "vanished": [False, False],
-                "kept": [True, True],
-                "drop_reason": ["", ""],
-                "annot_index": [1, 2],
-            }
-        ).to_csv(fm, sep="\t", index=False)
-        hm = tmp_path / "hm.tsv"
-        pd.DataFrame(
-            {
-                "annot_dim": ["dim_0", "dim_1"],
-                "source_dim": ["dim_47", "dim_47"],
-                "half": ["pos", "neg"],
-            }
-        ).to_csv(hm, sep="\t", index=False)
-        labels = load_labels(fm, model="m", half_map=hm)
-
-        renamed = loadings.rename(columns={"dim_0": "dim_47/pos"})
-        results = pd.DataFrame(
-            {"dim": ["dim_47/pos"], "Coefficient_z-score": [2.0]}
-        )
-        with pytest.raises(KeyError, match="display label"):
-            cs_from_z(renamed, results, model="m", trait="t", labels=labels)
-
 
 class TestReadCellScores:
     def test_reads_the_ratio_score(self, tmp_path):

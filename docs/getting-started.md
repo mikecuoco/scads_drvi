@@ -27,98 +27,120 @@ cd docs && make html
 # open docs/_build/html/index.html
 ```
 
-## The `Project` object
+## The result object
 
-Every path in the pipeline flows through a single {class}`~scads_drvi.config.Project`
-object. Nothing is hard-coded — every directory is either supplied by the caller or
-derived from a `root`:
+A fit's results live in **one `AnnData`**, shaped exactly the way DRVI's own
+interpretability functions expect it: `obs` = cells, `var` = one row per latent
+dimension, `X` = the signed latent representation. There is no separate
+path-configuration object — every function takes an explicit path.
+
+This package does not wrap training or loading a DRVI model at all: call
+`scvi.external.DRVI` directly, the same way
+[DRVI's own tutorial](https://drvi.readthedocs.io/latest/tutorials/external/general_pipeline.html)
+does, and write the result with a plain `AnnData.write_h5ad` call -- there is no h5ad
+wrapper here either:
 
 ```python
-import scads_drvi as sd
+from scvi.external import DRVI
+import anndata as ad
 
-proj = sd.Project(
-    root="/path/to/analysis",
-    fit="my_fit",
-    traits=("trait_a", "trait_b"),
+DRVI.setup_anndata(adata, batch_key="donor")
+model = DRVI(adata, n_latent=96)
+model.train(max_epochs=200)
+model.save("my_fit/model", overwrite=True)
+
+embed = ad.AnnData(
+    model.get_latent_representation(adata),
+    obs=adata.obs[["cell_type", "tissue", "donor"]].copy(),
 )
+embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+model.set_latent_dimension_stats(embed)   # vanished, order, title, and friends
+embed.obsm["X_umap"] = umap.UMAP().fit_transform(embed.X)   # set once computed, not read
+
+embed.uns["provenance"] = {"n_latent": 96, "batch_key": "donor", "model_dir": "my_fit/model"}
+embed.write_h5ad("my_fit.h5ad")
 ```
 
-Default directory layout under `root`:
+`embed.var` is populated by DRVI's own per-dimension statistics
+(`model.set_latent_dimension_stats`), so `embed` is immediately usable with
+`drvi.utils.metrics.*`, with a plain scanpy embedding scatter
+(`sc.pl.embedding(embed, basis="umap", color=...)`), and with this package's own
+in-house plotting -- `scads_drvi.pl.umap.latent_umap_grid` and
+`scads_drvi.pl.factors.latent_dimension_stats`/`latent_heatmap` -- which wrap
+`scanpy.pl.embedding`/`seaborn.heatmap` directly and need no `drvi-py` install.
 
-| `Project` field | default |
-|---|---|
-| `data` | `root/data` |
-| `fits` | `data/factorize` |
-| `enrich` | `data/enrich` |
-| `annotations` | `data/annotations` |
-| `figures` | `root/results/figures` |
-
-`fit` and `traits` have **no defaults on purpose** — guessing either silently points
-the pipeline at the wrong inputs.
-
-### Load from a YAML file
+Loading a checkpoint back is the same `DRVI.load` call DRVI's own tutorial shows —
+register `adata` with the **same** `batch_key` the fit was trained with (nothing checks
+this for you; get it from wherever you recorded it, e.g. your own `provenance` dict):
 
 ```python
-proj = sd.Project.from_yaml("/path/to/project.yaml")
-```
+from scvi.external import DRVI
+import anndata as ad
 
-```yaml
-# project.yaml
-root: /path/to/analysis
-fit: my_fit
-traits:
-  - trait_a
-  - trait_b
-```
+DRVI.setup_anndata(adata, batch_key="donor")
+model = DRVI.load("my_fit/model", adata=adata)
 
-### Load from environment variables
-
-```bash
-export SCADS_DRVI_ROOT=/path/to/analysis
-```
-
-```python
-proj = sd.Project.from_env(fit="my_fit", traits=("trait_a", "trait_b"))
+embed = ad.AnnData(
+    model.get_latent_representation(adata),
+    obs=adata.obs[["cell_type", "tissue", "donor"]].copy(),
+)
+embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+model.set_latent_dimension_stats(embed)
+embed.uns["provenance"] = {"n_latent": 96, "batch_key": "donor"}
+embed.write_h5ad("my_fit.h5ad")
 ```
 
 ## Reading a finished run
 
-Once a run has completed you can read everything through
-{func}`~scads_drvi.io.artifacts.load_interpretation`:
+```python
+import anndata as ad
+
+embed = ad.read_h5ad("my_fit.h5ad")
+embed.var["vanished"]          # DRVI's own per-dimension flag
+embed.obsm["X_umap"]           # the embedding, if one was attached
+```
+
+## Attaching enrichment results
+
+S-LDSC has no DRVI equivalent, so this package still runs it and reads its output — but
+the result now lives in the same h5ad, as one tidy table keyed by `dim` and `direction`
+(there is no persisted `dim_j/pos`/`dim_j/neg` split; a directional loadings view is
+derived on demand, see below):
 
 ```python
-from scads_drvi.io.artifacts import load_interpretation
+from scads_drvi.enrich.config import kept_dims, latent_stats_from_embed, select_factors
+from scads_drvi.enrich.ldsc import read_results
 
-interp = load_interpretation(
-    proj,
-    model="my_arm",
-    obs_path=proj.data / "matrix.h5ad",
-    obs_columns=["cell_type", "tissue", "donor"],
-    derived={"peak_fraction": ("reads_in_peaks", "total_reads")},
-    umap_path=proj.enrich_dir("my_arm") / "umap.tsv",
-)
+stats = latent_stats_from_embed(embed)
+fmap = select_factors(stats, list(embed.var_names))
+keep = kept_dims(fmap)                       # dims that survive vanished-filtering
+annot2dim = {f"k{i + 1}": dim for i, dim in enumerate(keep)}
 
-interp.traits            # ("trait_a", "trait_b")
-interp.n_cells           # 1_263_026
-interp.labels.n_kept     # 124
+results = read_results(results_root, traits=("trait_a", "trait_b"), annot2dim=annot2dim)
+embed.uns.setdefault("enrich", {})["my_arm"] = {
+    "results": results,
+    "factor_selection": fmap.drop(columns="annot_index"),
+}
+embed.write_h5ad("my_fit.h5ad")
 
-results = interp.for_trait("trait_a")   # per-factor results DataFrame
+arm = embed.uns["enrich"]["my_arm"]
+arm["results"].query("direction == 'pos' and trait == 'trait_a'")
 ```
 
 ## Computing cell scores
 
 ```python
-from scads_drvi.io.artifacts import read_loadings
+import numpy as np
+import pandas as pd
+
 from scads_drvi.scores.cell import cs_from_z
 
-loadings = read_loadings(
-    proj.contract("my_arm")["loadings"],
-    npz=proj.contract("my_arm")["loadings_npz"],
-    dims=list(interp.labels.kept_dims),
-)
-scores = cs_from_z(
-    loadings, results, model="my_arm", trait="trait_a", labels=interp.labels
-)
+primary = arm["results"].loc[arm["results"]["trait"] == "trait_a"]
+# relu(X) -- the ONLY place a pos/neg split is ever materialized, derived on demand
+loadings = pd.DataFrame(
+    np.clip(embed.X, 0, None), index=embed.obs_names, columns=embed.var_names
+)[keep]
+scores = cs_from_z(loadings, primary, model="my_arm", trait="trait_a")
 
 scores.null    # 0.0  — read this; never hardcode it beside an axis
 scores.label   # "$CS_i$ (z-weighted loading sum)"
@@ -131,14 +153,13 @@ are confined by directory and imported inside functions:
 
 | module | needs |
 |---|---|
-| `factorize/model.py`, `factorize/multigpu.py` | `torch`, `scvi-tools` (function-local) |
-| `viz/` | `matplotlib`, `seaborn` (function-local) |
-| `io/h5ad.py` | `h5py` at module scope |
-| `io/artifacts.py` | `h5py`, function-local |
+| `pl/` | `matplotlib`, `seaborn`, `scanpy` (→ `anndata`), function-local |
 | everything else | `numpy` / `pandas` / `scipy` / `pyyaml` |
 
-This matters because the environment that runs enrichment stages has no torch, matplotlib,
-seaborn or h5py, and must still import and use the loaders, statistics, and scoring.
+This matters because the environment that runs enrichment stages has no torch, scvi,
+drvi, matplotlib, seaborn, h5py or anndata, and must still import and use the loaders,
+statistics, and scoring. A result h5ad's own I/O is a plain `anndata.read_h5ad`/
+`AnnData.write_h5ad` call at the caller's own site -- there is no wrapper for it here.
 
 ## Running the tests
 

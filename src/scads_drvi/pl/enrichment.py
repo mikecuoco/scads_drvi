@@ -1,15 +1,18 @@
 """Enrichment figures.
 
 Every function takes tidy frames -- never a path -- and returns the figure plus its axes.
-Tick labels go through the factor labels so a panel cannot be titled with an index name,
-and any function that would otherwise receive a per-cell table takes a
-:class:`~scads_drvi.viz.frugal.BoxStats` instead, which makes handing it a million rows
-impossible rather than merely inadvisable.
+Tick labels are the results table's own ``dim`` value plus a ``+``/``-`` suffix when the
+row carries a ``direction`` (see :func:`scads_drvi.enrich.ldsc.read_results`); pass
+``titles=embed.var["title"]`` to show DRVI's own ``"DR 1"`` naming instead of the raw
+``dim`` value (``"dim_47"``) -- the same ``"DR 1+"``/``"DR 1-"`` convention
+:func:`scads_drvi.pl.umap.latent_umap_grid` uses. Any function that would otherwise
+receive a per-cell table takes a :class:`~scads_drvi.pl.frugal.BoxStats` instead, which
+makes handing it a million rows impossible rather than merely inadvisable.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -19,8 +22,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
-    from scads_drvi.labels import FactorLabels
-    from scads_drvi.viz.frugal import BoxStats
+    from scads_drvi.pl.frugal import BoxStats
 
 __all__ = [
     "heritability_landscape",
@@ -32,25 +34,35 @@ __all__ = [
 
 Z_COLUMN = "Coefficient_z-score"
 
+_SUFFIX = {"pos": "+", "neg": "-", "combined": ""}
 
-def _labelled(results: pd.DataFrame, labels: FactorLabels | None) -> list[str]:
-    if "display" in results.columns:
-        return results["display"].astype(str).tolist()
-    if labels is not None:
-        return labels.display_labels(results["dim"].astype(str))
-    return results["dim"].astype(str).tolist()
+
+def _labelled(
+    results: pd.DataFrame, titles: Mapping[str, str] | None = None
+) -> list[str]:
+    """A reader-facing name per row: ``dim`` (or its display title, from `titles`, when
+    given -- e.g. DRVI's own ``"DR 1"``) plus a ``+``/``-`` suffix when the row carries
+    a ``direction``, without ever materializing a ``dim_47/pos``-shaped column name.
+    """
+    dims = results["dim"].astype(str)
+    if titles is not None:
+        dims = dims.map(titles).fillna(dims)
+    if "direction" not in results.columns:
+        return dims.tolist()
+    suffix = results["direction"].map(_SUFFIX).fillna("")
+    return (dims + suffix).tolist()
 
 
 def heritability_landscape(
     results: pd.DataFrame,
     *,
     trait: str | None = None,
-    labels: FactorLabels | None = None,
     top_n: int = 4,
     ramp=None,
     q_column: str = "fdr_q",
     z_column: str = Z_COLUMN,
     alpha: float = 0.05,
+    titles: Mapping[str, str] | None = None,
 ) -> tuple[Figure, tuple[Axes, Axes]]:
     """Ranked z-scores and a volcano, sharing one significance ramp.
 
@@ -59,12 +71,13 @@ def heritability_landscape(
     previous run is wrong for this one.
 
     `alpha` is passed to both the boundary and its label, so the line and the text naming
-    it cannot be set at different levels.
+    it cannot be set at different levels. `titles` (e.g. `embed.var["title"]`) shows
+    each top-`top_n` annotation as DRVI's own `"DR 1"` naming plus a `+`/`-` suffix,
+    rather than the raw `dim` value.
     """
     import matplotlib.pyplot as plt
 
-    from scads_drvi.stats import bh_threshold_z
-    from scads_drvi.viz.color import (
+    from scads_drvi.pl.color import (
         DEFAULT_RAMP,
         Z_HIGH_CONFIDENCE,
         Z_NOMINAL_ONE_TAILED,
@@ -72,6 +85,7 @@ def heritability_landscape(
         significance_colors,
         significance_handles,
     )
+    from scads_drvi.stats import bh_threshold_z
 
     ramp = ramp or DEFAULT_RAMP
     frame = results if trait is None else results.loc[results["trait"] == trait]
@@ -82,7 +96,7 @@ def heritability_landscape(
             raise KeyError(f"{column!r} not in results; run stats.add_fdr first")
 
     frame = frame.sort_values(z_column, ascending=False)
-    names = _labelled(frame, labels)
+    names = _labelled(frame, titles)
     z = frame[z_column].to_numpy(dtype=float)
     q = frame[q_column].to_numpy(dtype=float)
     colors = significance_colors(q, ramp=ramp)
@@ -134,14 +148,16 @@ def trait_concordance(
     results: pd.DataFrame,
     *,
     traits: Sequence[str],
-    labels: FactorLabels | None = None,
     z_column: str = Z_COLUMN,
     top_n: int = 4,
+    titles: Mapping[str, str] | None = None,
 ) -> tuple[Figure, tuple[Axes, Axes]]:
     """Two traits' z-scores against each other, plus the distribution of the difference.
 
     A sensitivity analysis reads as concordance plus a shift; separating the two panels
     keeps "the same factors rank highly" distinguishable from "every z moved down".
+    `titles` (e.g. `embed.var["title"]`) shows each top-`top_n` annotation as DRVI's own
+    `"DR 1"` naming plus a `+`/`-` suffix, rather than the raw `dim` value.
     """
     import matplotlib.pyplot as plt
 
@@ -149,7 +165,11 @@ def trait_concordance(
     if len(traits) != 2:
         raise ValueError(f"need exactly two traits, got {traits}")
 
-    wide = results.pivot_table(index="dim", columns="trait", values=z_column)
+    # Pivoting on `dim` alone would silently average a directional arm's pos and neg
+    # rows together -- pivot on both when `direction` is present so each row of `wide`
+    # is still one factor, not one factor with two directions blended into it.
+    index = ["dim", "direction"] if "direction" in results.columns else "dim"
+    wide = results.pivot_table(index=index, columns="trait", values=z_column)
     missing = [t for t in traits if t not in wide.columns]
     if missing:
         raise KeyError(f"no results for trait(s) {missing}")
@@ -158,11 +178,13 @@ def trait_concordance(
         raise ValueError("no factor has a z-score for both traits")
 
     left, right = wide[traits[0]].to_numpy(), wide[traits[1]].to_numpy()
-    names = (
-        labels.display_labels(wide.index.astype(str))
-        if labels is not None
-        else wide.index.astype(str).tolist()
-    )
+    titled = (lambda dim: titles.get(dim, dim)) if titles is not None else (lambda dim: dim)
+    if isinstance(index, list):
+        names = [
+            f"{titled(dim)}{_SUFFIX.get(direction, '')}" for dim, direction in wide.index
+        ]
+    else:
+        names = [titled(str(dim)) for dim in wide.index]
 
     fig, (scatter, hist) = plt.subplots(1, 2, figsize=(9.0, 3.6))
 
@@ -218,7 +240,7 @@ def covariate_audit(
     import matplotlib.pyplot as plt
     from scipy.stats import spearmanr
 
-    from scads_drvi.viz.umap import subsample
+    from scads_drvi.pl.umap import subsample
 
     covariates = list(covariates)
     if not covariates:
@@ -267,8 +289,8 @@ def score_by_group(
     """
     import matplotlib.pyplot as plt
 
-    from scads_drvi.viz.color import categorical_palette
-    from scads_drvi.viz.frugal import draw_boxes
+    from scads_drvi.pl.color import categorical_palette
+    from scads_drvi.pl.frugal import draw_boxes
 
     ordered = stats.order_by("median")
     if top_n is not None:
@@ -310,7 +332,7 @@ def grouped_landscape(
     import matplotlib.pyplot as plt
     from matplotlib import colormaps
 
-    from scads_drvi.viz.color import robust_norm
+    from scads_drvi.pl.color import robust_norm
 
     if means.shape != counts.shape:
         raise ValueError(

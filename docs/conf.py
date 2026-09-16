@@ -54,7 +54,16 @@ autodoc_typehints_fully_qualified = False
 autodoc_member_order = "bysource"
 # Delay heavy imports — the lazy-import pattern means some things resolve only
 # at call time; we import the package at build time without heavy deps installed.
-autodoc_mock_imports = ["torch", "scvi", "h5py", "matplotlib", "seaborn"]
+# `torch`/`scvi`/`drvi` are mocked defensively even though this package never imports
+# them itself (training/loading a DRVI model is the caller's own job, done directly
+# against `scvi.external.DRVI`) -- CI's docs job does not install them regardless.
+# `anndata` is mocked too, even though it's lighter than the others, because
+# `pl.umap`'s `from __future__ import annotations` leaves its `AnnData`-typed
+# signatures as strings that sphinx-autodoc-typehints resolves at build time; without a
+# real or mocked `anndata` that resolution raises a NameError.
+autodoc_mock_imports = [
+    "torch", "scvi", "drvi", "h5py", "matplotlib", "seaborn", "anndata",
+]
 
 # -- intersphinx: resolve cross-refs to upstream docs -------------------------
 intersphinx_mapping = {

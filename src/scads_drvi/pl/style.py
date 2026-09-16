@@ -2,7 +2,7 @@
 
 Usage
 -----
-    from scads_drvi.viz.style import apply_style
+    from scads_drvi.pl.style import apply_style
     apply_style()                          # default (constrained_layout=True)
     apply_style(constrained_layout=False)  # for colorbar + tight_layout layouts
 
