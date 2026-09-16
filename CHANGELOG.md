@@ -21,12 +21,15 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   dimension into two columns, `"{dim}+"`/`"{dim}-"`, a ReLU'd positive part and a
   ReLU'd negative part -- the same split DRVI's own
   `get_effect_of_splits_within_distribution` and this package's `enrich`/`scores`
-  modules already use, not `latent_umap_grid`'s whole-column negation (which serves a
-  colour-scale need a heatmap's already-diverging colourmap doesn't have). Passing
-  `cell_scores` also relocates `scanpy`'s own colorbar, previously sandwiched between
-  the heatmap and the new cell-score bar, to the figure's top right corner. The return
-  value grows to match what was requested (`ax`, `(bar, ax)`, `(ax, score)`, or
-  `(bar, ax, score)`).
+  modules already use, not `latent_umap_grid`'s whole-column negation. Since a ReLU'd
+  split's values are never negative, the heatmap itself also switches colour scale --
+  `cmap` (DRVI's own diverging `SaturatedRdBu`, `vcenter=0`) to `directional_cmap`
+  (default `pl.color.SATURATED_JUST_SKY_CMAP`, a one-sided white-to-saturated ramp
+  from `vmin=0`) -- so it is never spending half its range on values that cannot
+  occur. Passing `cell_scores` also relocates `scanpy`'s own colorbar, previously
+  sandwiched between the heatmap and the new cell-score bar, to the figure's top right
+  corner. The return value grows to match what was requested (`ax`, `(bar, ax)`,
+  `(ax, score)`, or `(bar, ax, score)`).
 - **Breaking: `pl.umap.latent_umap_grid`'s `directional` now defaults to `True`.**
   Every factor interpretability plot in this package now shows split factors by
   default; pass `directional=False` for the previous one-panel/one-column-per-

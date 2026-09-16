@@ -615,6 +615,22 @@ class TestLatentHeatmap:
         assert labels  # non-empty
         assert all(label.endswith(("+", "-")) for label in labels)
 
+    def test_directional_uses_a_one_sided_colormap_from_zero(self, heatmap_embed):
+        # A ReLU'd split's values are never negative -- a diverging colormap centred
+        # at 0 would waste half its range, so directional=True switches to a one-sided
+        # scale instead.
+        from scads_drvi.pl.color import SATURATED_JUST_SKY_CMAP, SATURATED_RED_BLUE_CMAP
+
+        _, ax_split = latent_heatmap(heatmap_embed, "grouping", make_balanced=False)
+        assert ax_split.images[0].get_cmap().name == SATURATED_JUST_SKY_CMAP.name
+        assert ax_split.images[0].norm.vmin == 0
+
+        _, ax_plain = latent_heatmap(
+            heatmap_embed, "grouping", make_balanced=False, directional=False
+        )
+        assert ax_plain.images[0].get_cmap().name == SATURATED_RED_BLUE_CMAP.name
+        assert ax_plain.images[0].norm.vcenter == 0
+
     def test_directional_heritability_uses_plus_minus_index(self, heatmap_embed):
         rng = np.random.default_rng(6)
         kept = heatmap_embed.var_names[~heatmap_embed.var["vanished"].to_numpy(dtype=bool)]

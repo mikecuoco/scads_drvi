@@ -434,6 +434,7 @@ def latent_heatmap(
     remove_vanished: bool = True,
     directional: bool = True,
     cmap=None,
+    directional_cmap=None,
     figsize: tuple[float, float] | None = None,
     seed: int = 0,
     heritability: pd.Series | None = None,
@@ -478,8 +479,16 @@ def latent_heatmap(
     and `cs_from_z`). Column identity for `heritability`/`heritability_se`/
     `heritability_q` becomes ``"{dim}+"``/``"{dim}-"`` accordingly (e.g. an LDSC
     results table's own ``dim`` + ``direction`` columns, both rows per factor, not
-    just one direction pre-selected). Pass `directional=False` for the older
-    one-column-per-factor view.
+    just one direction pre-selected). Since a ReLU'd split's values are never negative,
+    the heatmap itself switches from `cmap` (DRVI's own diverging ``SaturatedRdBu``,
+    which would waste half its range on values that never occur) to
+    `directional_cmap` (default :data:`scads_drvi.pl.color.SATURATED_JUST_SKY_CMAP`, a
+    one-sided white-to-saturated ramp with no ``vcenter``) -- the same reasoning
+    :func:`scads_drvi.pl.umap.latent_umap_grid` already applies to its own directional
+    panels, though its `directional_cmap` default (`SATURATED_SKY_CMAP`) differs since
+    its split negates whole columns rather than ReLU-ing them, so a panel's values are
+    not guaranteed non-negative the same way. Pass `directional=False` for the older
+    one-column-per-factor, diverging-colour view.
 
     Returns `scanpy`'s own ``"heatmap_ax"`` as `ax`; its own category color bar
     (`"groupby_ax"`) lives on the same `fig` alongside it -- moved to the figure's top
@@ -505,9 +514,10 @@ def latent_heatmap(
     """
     import scanpy as sc
 
-    from scads_drvi.pl.color import SATURATED_RED_BLUE_CMAP
+    from scads_drvi.pl.color import SATURATED_JUST_SKY_CMAP, SATURATED_RED_BLUE_CMAP
 
     cmap = SATURATED_RED_BLUE_CMAP if cmap is None else cmap
+    directional_cmap = SATURATED_JUST_SKY_CMAP if directional_cmap is None else directional_cmap
 
     if order_col is not None and order_col not in embed.var.columns:
         raise KeyError(f"{order_col!r} is not a column of embed.var")
@@ -560,10 +570,15 @@ def latent_heatmap(
             call_w += score_width_in
         call_figsize = (call_w, call_h)
 
+    heatmap_kwargs = (
+        {"cmap": directional_cmap, "vmin": 0}
+        if directional
+        else {"cmap": cmap, "vcenter": 0}
+    )
     axes = sc.pl.heatmap(
         embed, vars_to_show, categorical_column, gene_symbols=title_col,
         figsize=call_figsize, show_gene_labels=True, show=False,
-        vcenter=0, cmap=cmap, dendrogram=False,
+        dendrogram=False, **heatmap_kwargs,
     )
     heat = axes["heatmap_ax"]
     fig = heat.figure
