@@ -38,16 +38,19 @@ jobs:
             python: "3.12"
             deps: numpy pandas scipy pyyaml
 
-          # Mirrors env-qc-notebook: the declared dependency floors.
-          - name: floors (numpy 1.26, pandas 2.1)
-            python: "3.11"
-            deps: numpy==1.26.4 pandas==2.1.1 scipy==1.11.4 pyyaml h5py anndata matplotlib==3.8.4 seaborn
+          # Mirrors env-qc-notebook: the declared dependency floors. Raised to match
+          # scanpy's own floor (Requires-Python>=3.12, numpy>=2, pandas>=2.3 as of
+          # scanpy 1.12.4) rather than pinning an older scanpy or keeping it optional --
+          # pl/ now wraps scanpy.pl.embedding for every embedding figure.
+          - name: floors (numpy 2.0, pandas 2.3, scanpy 1.12.4)
+            python: "3.12"
+            deps: numpy==2.0.0 pandas==2.3.0 scipy==1.11.4 pyyaml h5py anndata matplotlib==3.8.4 seaborn scanpy==1.12.4
 
           # Mirrors env-scvi minus torch/scvi-tools, which are multi-GB and gate only the
           # model-access tests; those skip cleanly when torch is absent.
           - name: current (numpy 2, pandas 3, plotting + h5ad)
             python: "3.12"
-            deps: numpy pandas scipy pyyaml h5py anndata matplotlib seaborn
+            deps: numpy pandas scipy pyyaml h5py anndata matplotlib seaborn scanpy
 
     steps:
       - uses: actions/checkout@v7
@@ -58,10 +61,10 @@ jobs:
 
       # Dependencies are installed explicitly rather than via `pip install .` -- this
       # package's own hard dependencies are numpy/pandas/scipy/pyyaml/h5py/anndata/
-      # matplotlib/seaborn only. torch/scvi-tools/drvi-py live in the optional `drvi`
-      # extra (nothing in this package imports them; training/loading a DRVI model is
-      # the caller's own job against `scvi.external.DRVI` directly) and are never
-      # installed here.
+      # matplotlib/seaborn/scanpy only. torch/scvi-tools/drvi-py live in the optional
+      # `drvi` extra (nothing in this package imports them; training/loading a DRVI
+      # model is the caller's own job against `scvi.external.DRVI` directly) and are
+      # never installed here.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
