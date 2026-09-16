@@ -146,10 +146,20 @@ def provision_ldsc_reference(data_dir: Path = DATA) -> Path:
     dest = data_dir / "ldsc_reference" / CAPSULE_REF.name
     if dest.exists() and any(dest.iterdir()):
         print(f"already provisioned: {dest}")
-        return dest
-    dest.mkdir(parents=True, exist_ok=True)
-    print(f"copying reference panel from {CAPSULE_REF} to {dest}...")
-    subprocess.run(["rsync", "-a", f"{CAPSULE_REF}/", f"{dest}/"], check=True)
+    else:
+        dest.mkdir(parents=True, exist_ok=True)
+        print(f"copying reference panel from {CAPSULE_REF} to {dest}...")
+        subprocess.run(["rsync", "-a", f"{CAPSULE_REF}/", f"{dest}/"], check=True)
+
+    # ldsc's --print-snps wants a bare single column of SNP IDs; w_hm3.snplist ships
+    # as SNP/A1/A2 (needed as-is for munge-sumstats --merge-alleles) -- derive the
+    # single-column form once instead of reshaping it inline wherever it's used.
+    print_snps = dest / "w_hm3.snplist.print_snps"
+    if not print_snps.exists():
+        with open(dest / "w_hm3.snplist") as f_in, open(print_snps, "w") as f_out:
+            next(f_in)  # header
+            for line in f_in:
+                f_out.write(line.split("\t", 1)[0] + "\n")
     return dest
 
 
