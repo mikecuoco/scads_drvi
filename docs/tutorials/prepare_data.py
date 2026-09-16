@@ -175,15 +175,18 @@ def download_and_munge_sumstats(data_dir: Path = DATA, ref_dir: Path | None = No
         print(f"already munged: {munged_path}")
         return munged_path
 
-    from scads_drvi.enrich.binary import run_ldsc
+    from scads_drvi.enrich.binary import ensure_ldsc, run_ldsc
 
+    # ensure_ldsc resolves the actual binary path (PATH -> cache -> verified download);
+    # run_ldsc's own default ("ldsc") assumes it's already on PATH, which it isn't here.
+    ldsc_bin = ensure_ldsc()
     run_ldsc("munge-sumstats", {
         "sumstats": str(raw_path),
         "snp": "variant_id", "a1": "effect_allele", "a2": "other_allele",
         "p": "p_value", "signed_sumstats": "beta,0", "N": SUMSTATS_N,
         "merge_alleles": str(ref_dir / "w_hm3.snplist"),
         "out": str(sumstats_dir / "ra_ishigaki2022_eur"),
-    })
+    }, binary=ldsc_bin)
     if not munged_path.exists():
         raise FileNotFoundError(f"munge-sumstats did not produce {munged_path}")
     return munged_path
