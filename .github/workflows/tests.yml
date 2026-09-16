@@ -39,12 +39,15 @@ jobs:
             deps: numpy pandas scipy pyyaml
 
           # Mirrors env-qc-notebook: the declared dependency floors. Raised to match
-          # scanpy's own floor (Requires-Python>=3.12, numpy>=2, pandas>=2.3 as of
-          # scanpy 1.12.4) rather than pinning an older scanpy or keeping it optional --
-          # pl/ now wraps scanpy.pl.embedding for every embedding figure.
+          # scanpy's own floor (Requires-Python>=3.12, numpy>=2, pandas>=2.3,
+          # matplotlib>=3.10 as of scanpy 1.12.4) rather than pinning an older scanpy
+          # or keeping it optional -- pl/ now wraps scanpy.pl.embedding for every
+          # embedding figure. scipy==1.13.0 (one step past scanpy's own floor): the
+          # first scipy release compatible with numpy 2 -- scipy==1.11.4 caps
+          # numpy<1.28, unresolvable alongside numpy>=2.
           - name: floors (numpy 2.0, pandas 2.3, scanpy 1.12.4)
             python: "3.12"
-            deps: numpy==2.0.0 pandas==2.3.0 scipy==1.11.4 pyyaml h5py anndata matplotlib==3.8.4 seaborn scanpy==1.12.4
+            deps: numpy==2.0.0 pandas==2.3.0 scipy==1.13.0 pyyaml h5py anndata matplotlib==3.10.0 seaborn scanpy==1.12.4
 
           # Mirrors env-scvi minus torch/scvi-tools, which are multi-GB and gate only the
           # model-access tests; those skip cleanly when torch is absent.
