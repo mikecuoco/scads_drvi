@@ -105,15 +105,18 @@ def embed():
         },
         index=[f"c{i}" for i in range(n)],
     )
+    x = rng.normal(size=(n, k)).astype(np.float32)
     var = pd.DataFrame(
         {
             "order": np.arange(k),
             "vanished": [False] * (k - 2) + [True] * 2,
             "title": [f"DR {i + 1}" for i in range(k)],
+            "min": x.min(axis=0),
+            "max": x.max(axis=0),
         },
         index=[f"dim_{i}" for i in range(k)],
     )
-    e = ad.AnnData(X=rng.normal(size=(n, k)).astype(np.float32), obs=obs, var=var)
+    e = ad.AnnData(X=x, obs=obs, var=var)
     e.obsm["X_umap"] = rng.normal(size=(n, 2)).astype(np.float32)
     return e
 
@@ -346,13 +349,12 @@ class TestLatentDimensionStats:
         assert len(axes) == 2
 
     def test_vanished_and_kept_get_two_colours(self, dim_stats):
-        from scads_drvi.pl.color import categorical_palette
-
-        palette = categorical_palette(["vanished", "kept"])
+        # DRVI's own hardcoded convention (drvi.utils.pl.plot_latent_dimension_stats):
+        # vanished dims black, kept dims blue.
         _, axes = latent_dimension_stats(dim_stats, columns=("mean",))
         by_label = {c.get_label(): c for c in axes[0].collections}
-        assert to_hex(by_label["kept"].get_facecolor()[0]) == palette["kept"].lower()
-        assert to_hex(by_label["vanished"].get_facecolor()[0]) == palette["vanished"].lower()
+        assert to_hex(by_label["kept"].get_facecolor()[0]) == "#0000ff"
+        assert to_hex(by_label["vanished"].get_facecolor()[0]) == "#000000"
 
     def test_legend_present_only_when_vanished_kept(self, dim_stats):
         fig, _ = latent_dimension_stats(dim_stats, columns=("mean",))

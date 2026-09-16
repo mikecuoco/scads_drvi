@@ -6,10 +6,9 @@ percentile strings directly, e.g. ``vmin="p1"``) -- already does everything such
 needs: point sizing by cell count, a stable per-category palette or a colorbar, a
 legend. Call scanpy directly; this module does not wrap it a second time. What earns a
 wrapper here is a grid of one panel per latent dimension (:func:`latent_umap_grid`),
-which scanpy's own `color=` API does not give you for free: per-panel titles/limits and
-a directional +/- split (``relu(x)``/``relu(-x)``) assembled from one
-``sc.pl.embedding`` call, under this project's own robust percentile limits
-(:func:`scads_drvi.pl.color.percentile_bounds`).
+ported to match ``drvi.utils.pl.plot_latent_dims_in_umap``'s own mechanics exactly --
+DRVI's own colours, per-dimension colour limits and directional +/- split -- see its
+docstring.
 
 :func:`latent_umap_grid` takes the ``embed`` ``AnnData`` directly (``obs`` = cells, a
 named ``obsm`` basis, ``var`` = one row per latent dimension), the same convention
@@ -108,29 +107,36 @@ def latent_umap_grid(
     order_col: str = "order",
     title_col: str = "title",
     ncols: int = 5,
-    cmap: str = "RdBu_r",
-    directional_cmap: str = "viridis",
-    percentiles: tuple[float, float] | None = None,
+    cmap=None,
+    directional_cmap=None,
+    min_max_thresholds: tuple[float, float] | None = (-1.0, 1.0),
+    color_bar_rescale_ratio: float = 1.0,
+    rearrange_titles: bool = True,
     n: int | None = SUBSAMPLE_DEFAULT,
     seed: int = SUBSAMPLE_SEED,
     **kwargs,
 ) -> Figure:
-    """One embedding panel per latent dimension, in this project's own style.
+    """One embedding panel per latent dimension, ported to match
+    ``drvi.utils.pl.plot_latent_dims_in_umap``'s own mechanics exactly: DRVI's
+    ``SaturatedRdBu``/``SaturatedSky`` colours (`cmap`/`directional_cmap`, default
+    :data:`scads_drvi.pl.color.SATURATED_RED_BLUE_CMAP`/:data:`~.SATURATED_SKY_CMAP`),
+    per-dimension colour limits from `embed.var["min"]`/`["max"]` (widened to
+    `min_max_thresholds` rather than this project's own robust percentile limits), a
+    directional split built the same way DRVI builds it -- concatenating a negated copy
+    of `embed` (`ad.concat`), not a temporary ``obs`` column -- and DRVI's own trick of
+    moving each panel's title into the plot itself (`rearrange_titles`) with the
+    negative panel's y-axis (colorbar) flipped and relabelled.
 
-    Replaces ``drvi.utils.pl.plot_latent_dims_in_umap``. `directional=True` doubles
-    every kept dimension into a ``+``/``-`` panel (``relu(x)``/``relu(-x)``, computed
-    inline as temporary ``obs`` columns -- a one-line clip on a column already in hand,
-    not a reason for a dedicated helper). Those panels use `directional_cmap`
-    (one-sided, since a ReLU output is non-negative) rather than the diverging `cmap`
-    the signed panels use.
-
-    One ``sc.pl.embedding`` call draws the whole grid (`color=` takes the full list of
-    panel names, with a matching `vmin`/`vmax` per panel), so panel layout, spacing and
-    per-panel colorbars all come from scanpy rather than being rebuilt here.
+    `dim_subset` still names raw `embed.var_names` (this project's own convention
+    throughout), not `title_col` values as DRVI's own `dim_subset` does.
     """
+    import anndata as ad
     import scanpy as sc
 
-    from scads_drvi.pl.color import ROBUST_LIMITS, percentile_bounds
+    from scads_drvi.pl.color import SATURATED_RED_BLUE_CMAP, SATURATED_SKY_CMAP
+
+    cmap = SATURATED_RED_BLUE_CMAP if cmap is None else cmap
+    directional_cmap = SATURATED_SKY_CMAP if directional_cmap is None else directional_cmap
 
     for column in (order_col, title_col):
         if column not in embed.var.columns:
@@ -152,42 +158,61 @@ def latent_umap_grid(
     if not dims:
         raise ValueError("no latent dimensions to plot after filtering")
 
-    plotted = _subsample_embed(embed, n, seed=seed)
-    values = plotted[:, dims].X
-    values = np.asarray(values.toarray() if hasattr(values, "toarray") else values, dtype=float)
+    plotted = _subsample_embed(embed, n, seed=seed)[:, dims].copy()
+    # A plain 0..len(dims)-1 rank, in the same order `dims` was already sorted into
+    # above -- DRVI's own `order_col` arithmetic (+/- a small epsilon per direction)
+    # only needs *an* ordering to offset, not the original fit-wide rank.
+    plotted.var[order_col] = np.arange(len(dims), dtype=float)
 
-    vmin_default, vmax_default = percentile_bounds(percentiles or ROBUST_LIMITS)
-    panels: list[str] = []
-    cmaps: list[str] = []
-    vmins: list = []
-    vmaxs: list = []
-    titles: list[str] = []
+    if directional:
+        pos, neg = plotted.copy(), plotted.copy()
+        neg.X = -neg.X
+        neg.var["min"], neg.var["max"] = -neg.var["max"], -neg.var["min"]
+        pos.var["_direction"], neg.var["_direction"] = "+", "-"
+        pos.var[title_col] = pos.var[title_col].astype(str) + "+"
+        neg.var[title_col] = neg.var[title_col].astype(str) + "-"
+        pos.var[order_col] = pos.var[order_col] + 1e-8
+        neg.var[order_col] = neg.var[order_col] - 1e-8
+        plotted = ad.concat([pos, neg], axis=1, join="inner", merge="first")
+        # dim_0..dim_{K-1} now appears twice (once negated) -- var_names must be
+        # unique for scanpy's gene_symbols= lookup below to resolve one row per title.
+        plotted.var_names = [str(i) for i in range(plotted.n_vars)]
 
-    for j, dim in enumerate(dims):
-        title = str(dim_stats.loc[dim, title_col])
-        if directional:
-            pos, neg = f"{dim}__pos", f"{dim}__neg"
-            plotted.obs[pos] = np.clip(values[:, j], 0, None)
-            plotted.obs[neg] = np.clip(-values[:, j], 0, None)
-            panels += [pos, neg]
-            cmaps += [directional_cmap, directional_cmap]
-            vmins += ["p0", "p0"]
-            vmaxs += [vmax_default, vmax_default]
-            titles += [f"{title}+", f"{title}-"]
-        else:
-            plotted.obs[dim] = values[:, j]
-            panels.append(dim)
-            cmaps.append(cmap)
-            vmins.append(vmin_default)
-            vmaxs.append(vmax_default)
-            titles.append(title)
+    # `.var`'s own row order need not match -- color=cols_to_show below is an
+    # explicit, already-sorted panel list; gene_symbols= resolves each title to its
+    # var row regardless of where that row physically sits.
+    tmp_df = plotted.var.sort_values(order_col)
+    cols_to_show = list(tmp_df[title_col])
 
-    # sc.pl.embedding takes one `cmap=`, not one per panel -- every panel here shares
-    # `cmap` (non-directional) or `directional_cmap` (directional), never a mix, so this
-    # is safe; a future per-panel-cmap need would have to draw panels individually.
-    fig = sc.pl.embedding(
-        plotted, basis="umap", color=panels, cmap=cmaps[0], vmin=vmins, vmax=vmaxs,
-        vcenter=0 if not directional else None, title=titles, ncols=ncols,
-        show=False, return_fig=True, **kwargs,
+    if min_max_thresholds is not None:
+        vmin = list(np.minimum(tmp_df["min"].to_numpy(dtype=float), min_max_thresholds[0]))
+        vmax = list(np.maximum(tmp_df["max"].to_numpy(dtype=float), min_max_thresholds[1]))
+    else:
+        vmin = list(tmp_df["min"].to_numpy(dtype=float))
+        vmax = list(tmp_df["max"].to_numpy(dtype=float))
+
+    fig = sc.pl.umap(
+        plotted, gene_symbols=title_col, color=cols_to_show, return_fig=True,
+        frameon=False, cmap=directional_cmap if directional else cmap,
+        vmin=vmin, vcenter=0, vmax=vmax, ncols=ncols, show=False, **kwargs,
     )
+    for i, ax in enumerate(fig.axes[1 : 2 * len(tmp_df) : 2]):
+        pos_ax = ax.get_position()
+        ax.set_position(
+            [pos_ax.x0, pos_ax.y0, pos_ax.width, pos_ax.height * color_bar_rescale_ratio]
+        )
+        if directional and tmp_df["_direction"].iloc[i] == "-":
+            ax.invert_yaxis()
+            labels = -ax.get_yticks()
+            if all(x == int(x) for x in labels):
+                labels = [int(x) for x in labels]
+            ax.set_yticklabels(labels)
+    if rearrange_titles:
+        for ax in fig.axes:
+            ax.text(
+                0.935, 0.05, ax.get_title(), size=15, ha="left", color="black",
+                rotation=90, transform=ax.transAxes,
+            )
+            ax.set_title("")
+
     return fig

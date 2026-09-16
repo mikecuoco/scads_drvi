@@ -42,9 +42,9 @@ vanished/order/title stats, factor↔covariate association scores — this packa
 `model.set_latent_dimension_stats` / `drvi.utils.metrics.*` directly rather than
 reimplementing it. Plotting used to extend that to `drvi.utils.pl.*` too; it no longer
 does — `pl.umap.latent_umap_grid` and `pl.factors.latent_dimension_stats`/
-`latent_heatmap` wrap `scanpy.pl.embedding`/`seaborn.heatmap` directly with this
-project's own colour/style policy, so no `drvi-py` install is needed just to draw a
-figure. A plain categorical or continuous embedding scatter needs no wrapper at all —
+`latent_heatmap` wrap `scanpy.pl.embedding`/`seaborn.heatmap` directly, ported to match
+DRVI's own colours and mechanics exactly, so no `drvi-py` install is needed just to draw
+a figure that looks like DRVI's own. A plain categorical or continuous embedding scatter needs no wrapper at all —
 `sc.pl.embedding(embed, basis="umap", color=...)` is already the whole call. (`scanpy`
 is accordingly a hard dependency now, and the floor is Python
 3.12 / numpy 2 / pandas 2.3 — scanpy's own floor.)

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+from matplotlib.colors import LinearSegmentedColormap
 
 if TYPE_CHECKING:  # pragma: no cover
     from matplotlib.colors import Normalize
@@ -28,6 +29,7 @@ __all__ = [
     "Z_HIGH_CONFIDENCE",
     "robust_limits",
     "robust_norm",
+    "percentile_bounds",
     "SignificanceRamp",
     "DEFAULT_RAMP",
     "significance_class",
@@ -35,10 +37,39 @@ __all__ = [
     "significance_handles",
     "categorical_palette",
     "add_threshold_lines",
+    "SATURATED_RED_BLUE_CMAP",
+    "SATURATED_JUST_SKY_CMAP",
+    "SATURATED_SKY_CMAP",
 ]
 
 #: The one default percentile pair for robust colour limits.
 ROBUST_LIMITS: tuple[float, float] = (1.0, 99.5)
+
+# Copied verbatim from DRVI's own `drvi.utils.plotting._cmap`
+# (https://github.com/theislab/DRVI/blob/main/src/drvi/utils/plotting/_cmap.py), so
+# `latent_umap_grid`/`latent_heatmap` render with the exact colours DRVI's own
+# `plot_latent_dims_in_umap`/`plot_latent_dims_in_heatmap` do.
+_cmap_data = {
+    "red": ((0.0, 0.0, 0.0), (0.25, 0.0, 0.0), (0.5, 1.0, 1.0), (0.75, 1.0, 1.0), (1.0, 0.5, 0.0)),
+    "green": ((0.0, 0.0, 0.0), (0.25, 0.0, 0.0), (0.5, 1.0, 1.0), (0.75, 0.0, 0.0), (1.0, 0.0, 0.0)),
+    "blue": ((0.0, 0.0, 0.5), (0.25, 1.0, 1.0), (0.5, 1.0, 1.0), (0.75, 0.0, 0.0), (1.0, 0.0, 0.0)),
+}
+SATURATED_RED_BLUE_CMAP = LinearSegmentedColormap("SaturatedRdBu", _cmap_data)
+
+_cmap_data = {
+    "red": ((0.0, 0.0, 240 / 256), (0.75, 0.0, 0.0), (1.0, 0.0, 0.0)),
+    "green": ((0.0, 0.0, 240 / 256), (0.75, 200 / 255, 200 / 255), (1.0, 63 / 255, 0.0)),
+    "blue": ((0.0, 0.0, 240 / 256), (0.75, 255 / 255, 255 / 255), (1.0, 80 / 255, 0.0)),
+}
+SATURATED_JUST_SKY_CMAP = LinearSegmentedColormap("SaturatedJSky", _cmap_data)
+
+_cmap_data = {
+    "red": ((0.0, 0.0, 136 / 255), (0.5, 250 / 256, 250 / 256), (0.65, 0.0, 0.0), (1.0, 0.0, 0.0)),
+    "green": ((0.0, 0.0, 136 / 255), (0.5, 250 / 256, 250 / 256), (0.65, 200 / 255, 200 / 255), (1.0, 63 / 255, 0.0)),
+    "blue": ((0.0, 0.0, 136 / 255), (0.5, 250 / 256, 250 / 256), (0.65, 255 / 255, 255 / 255), (1.0, 80 / 255, 0.0)),
+}
+SATURATED_SKY_CMAP = LinearSegmentedColormap("SaturatedSky", _cmap_data)
+del _cmap_data
 
 #: One-tailed nominal significance in z. Derived, not the retyped 1.645.
 Z_NOMINAL_ONE_TAILED: float = 1.6448536269514722
@@ -119,6 +150,19 @@ def robust_norm(
             f"PowerNorm needs vmin >= 0, got {low}. Use gamma=1 for a diverging scale."
         )
     return PowerNorm(gamma=gamma, vmin=low, vmax=high)
+
+
+def percentile_bounds(percentiles: tuple[float, float] = ROBUST_LIMITS) -> tuple[str, str]:
+    """This project's percentile pair, spelled the way ``scanpy.pl.embedding`` wants it.
+
+    scanpy accepts ``vmin``/``vmax`` as a string ``"pN"`` meaning "the Nth percentile of
+    the data actually being plotted," computed by scanpy itself at draw time -- so this
+    is not a second implementation of :func:`robust_limits`, only the one place this
+    project's default percentile pair is spelled in scanpy's own syntax, so it is never
+    retyped (and never drifts from :data:`ROBUST_LIMITS`) at a call site.
+    """
+    low, high = percentiles
+    return f"p{low:g}", f"p{high:g}"
 
 
 @dataclass(frozen=True)

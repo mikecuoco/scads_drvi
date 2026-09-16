@@ -99,6 +99,8 @@ class _FakeModel:
         embed.var["max_value"] = np.abs(self._z).max(axis=0)
         embed.var["mean"] = self._z.mean(axis=0)
         embed.var["std"] = self._z.std(axis=0)
+        embed.var["min"] = self._z.min(axis=0)
+        embed.var["max"] = self._z.max(axis=0)
 
 
 @pytest.fixture(scope="module")

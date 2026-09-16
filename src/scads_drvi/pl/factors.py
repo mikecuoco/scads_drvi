@@ -2,13 +2,16 @@
 
 Figures about the factors themselves rather than about a trait: which track a nuisance
 covariate, how factors correlate with one another, how groups load onto them, and (below)
-this project's own in-house replacements for the two DRVI-specific figures this module
-used to defer entirely -- per-dimension summary statistics
-(:func:`latent_dimension_stats`, replacing ``drvi.utils.pl.plot_latent_dimension_stats``)
-and a factor-value-by-category heatmap (:func:`latent_heatmap`, replacing
-``drvi.utils.pl.plot_latent_dims_in_heatmap``). :func:`latent_heatmap_with_heritability`
-pairs that heatmap with a per-dim heritability bar sharing its column order -- a
-genuinely complementary companion panel, unlike
+this project's own in-house ports of the two DRVI-specific figures this module used to
+defer entirely -- per-dimension summary statistics (:func:`latent_dimension_stats`,
+ported from ``drvi.utils.pl.plot_latent_dimension_stats``) and a factor-value-by-category
+heatmap (:func:`latent_heatmap`, ported from ``drvi.utils.pl.plot_latent_dims_in_heatmap``)
+-- matching each one's own colours, per-dimension scaling and sampling mechanics exactly
+(see each function's own docstring for where this project's return-value contract and one
+already-fixed layout bug are kept instead), so no `drvi-py` install is needed just to draw
+a figure that looks like DRVI's own. :func:`latent_heatmap_with_heritability` pairs that
+heatmap with a per-dim heritability bar sharing its column order -- a genuinely
+complementary companion panel, unlike
 :func:`scads_drvi.pl.enrichment.heritability_landscape`'s bar+volcano, which collapse to
 the same ranking when the volcano's x-axis is itself a z-score.
 """
@@ -192,16 +195,20 @@ def latent_dimension_stats(
 ) -> tuple[Figure, np.ndarray]:
     """One rank-vs-value panel per named column of `dim_stats` -- e.g. ``embed.var``.
 
-    Replaces ``drvi.utils.pl.plot_latent_dimension_stats``. Points split vanished/kept
-    by colour via :func:`scads_drvi.pl.color.categorical_palette` (this project's stable
-    two-class palette, in place of DRVI's hardcoded black/blue), connected by a grey
-    line ranked by `order_col`. `log_scale="try"` (the default) switches a panel to
-    log-y only when that column's finite values are all positive, matching DRVI's own
-    semantics; a shared figure-level legend is drawn when `remove_vanished=False`.
+    Ported to match ``drvi.utils.pl.plot_latent_dimension_stats``'s own mechanics
+    exactly: points split vanished (black) / kept (blue) -- DRVI's own hardcoded
+    colours -- connected by a plain grey line ranked by `order_col`, under the x-axis
+    label DRVI always uses ("Rank based on Explanation Share") regardless of
+    `order_col`'s own name. `log_scale="try"` (the default) switches a panel to log-y
+    only when that column's *finite* values are all positive -- DRVI's own condition,
+    checked only on finite values here so one non-finite entry does not silently leave
+    an otherwise-positive column on a linear scale. A shared figure-level legend is
+    drawn when `remove_vanished=False`, positioned to coexist with `constrained_layout`
+    rather than DRVI's raw `bbox_to_anchor` (which this project already hit and fixed a
+    real overlap bug from).
     """
     import matplotlib.pyplot as plt
-
-    from scads_drvi.pl.color import categorical_palette
+    import matplotlib.ticker as mticker
 
     if order_col not in dim_stats.columns:
         raise KeyError(f"{order_col!r} is not a column of dim_stats")
@@ -219,7 +226,7 @@ def latent_dimension_stats(
     frame = frame.sort_values(order_col)
     vanished = frame["vanished"].astype(bool).to_numpy()
     rank = frame[order_col].to_numpy(dtype=float)
-    palette = categorical_palette(["vanished", "kept"])
+    palette = {"vanished": "black", "kept": "blue"}
 
     ncols = min(ncols, len(columns))
     nrows = int(np.ceil(len(columns) / ncols))
@@ -230,7 +237,7 @@ def latent_dimension_stats(
 
     for ax, column in zip(flat, columns, strict=False):
         values = frame[column].to_numpy(dtype=float)
-        ax.plot(rank, values, "-", color="#949494", linewidth=0.8, zorder=1)
+        ax.plot(rank, values, "-", color="grey", linewidth=0.8, zorder=1)
         ax.scatter(
             rank[~vanished], values[~vanished], color=palette["kept"], s=10,
             zorder=2, label="kept",
@@ -239,21 +246,29 @@ def latent_dimension_stats(
             rank[vanished], values[vanished], color=palette["vanished"], s=10,
             zorder=2, label="vanished",
         )
-        ax.set_xlabel(order_col)
+        ax.set_xlabel("Rank based on Explanation Share")
         ax.set_ylabel((titles or {}).get(column, column))
         finite = values[np.isfinite(values)]
         use_log = finite.size > 0 and finite.min() > 0 if log_scale == "try" else bool(log_scale)
         if use_log:
             ax.set_yscale("log")
+            # The default log-scale formatter switches to "N x 10^k" scientific
+            # notation whenever a panel's range does not span a full decade (every
+            # column here regularly doesn't) -- plain numbers read better and are what
+            # every other panel in this package already uses.
+            ax.yaxis.set_major_formatter(mticker.ScalarFormatter())
+            ax.yaxis.set_minor_formatter(mticker.NullFormatter())
 
     for ax in flat[len(columns):]:
         fig.delaxes(ax)
 
     if not remove_vanished:
         handles, labels = flat[0].get_legend_handles_labels()
-        fig.legend(
-            handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.5), frameon=False
-        )
+        # "outside ..." is constrained-layout-aware -- it reserves real figure space for
+        # the legend, unlike a raw bbox_to_anchor outside the axes grid, which
+        # constrained_layout knows nothing about and can end up squeezing into the last
+        # panel, overlapping its own y-axis label.
+        fig.legend(handles, labels, loc="outside center right", frameon=False)
 
     return fig, flat[: len(columns)]
 
@@ -273,10 +288,11 @@ def _ordered_latent_matrix(
 ) -> tuple[np.ndarray, list[str], list[str], list[tuple[str, int, int]]]:
     """Column order, row grouping and the cells x dims matrix behind a latent heatmap.
 
-    Shared by :func:`latent_heatmap` and :func:`latent_heatmap_with_heritability` so a
-    heritability bar panel is guaranteed to describe the same dims in the same order as
-    the heatmap under it, rather than two independently-computed orderings that only
-    coincide by construction.
+    Used by :func:`latent_heatmap_with_heritability`, whose heritability bar panel needs
+    exactly this computation exposed separately so the bar is guaranteed to describe the
+    same dims in the same order as the heatmap under it. :func:`latent_heatmap` itself
+    does not use this -- see its own docstring for why it is a separate, `embed`-based
+    implementation.
     """
     import pandas as pd
 
@@ -353,55 +369,145 @@ def _draw_latent_heatmap(ax: Axes, image: np.ndarray, titles: list[str], blocks,
     return im
 
 
-def latent_heatmap(
-    values: pd.DataFrame,
-    categories: pd.Series,
-    dim_stats: pd.DataFrame,
-    *,
-    title_col: str = "title",
-    order_col: str = "order",
-    order: Literal["rank", "cluster"] = "rank",
-    method: str = "average",
-    remove_vanished: bool = True,
-    balance: int | None = None,
-    cmap: str = "RdBu_r",
-    seed: int = 42,
-) -> tuple[Figure, Axes]:
-    """Heatmap of latent dimensions (columns) x cells (rows), grouped by `categories`.
-
-    Replaces ``drvi.utils.pl.plot_latent_dims_in_heatmap``. Rows are grouped by category
-    (stable) and, if `balance` is set, capped per category via
-    :func:`scads_drvi.pl.umap.subsample`'s `stratify` -- this project's own reproducible,
-    without-replacement equivalent of DRVI's ``make_balanced_subsample``. Columns are
-    ordered by `dim_stats[order_col]` (`order="rank"`, the default) or by hierarchical
-    clustering of the dimensions' correlation (`order="cluster"`, reusing
-    :func:`_cluster_order` -- the same clustering `factor_correlation` uses), which
-    replaces DRVI's `sort_by_categorical` (a per-dimension-argmax heuristic that only
-    worked because ``groupby().sample()`` happened to return category-blocked rows) with
-    an ordering that doesn't depend on that incidental side effect.
-
-    Category blocks get alternating shaded bands and a right-margin label, the same
-    visual idiom :func:`scads_drvi.pl.enrichment.grouped_landscape` uses for its
-    `blocks=`. No dendrogram is drawn even under `order="cluster"` -- matches DRVI's own
-    `dendrogram=False` default; the clustering only decides column order.
-
-    See :func:`latent_heatmap_with_heritability` for the same heatmap with a per-dim
-    heritability bar drawn above it, columns guaranteed to line up.
+def _balanced_rows(categories: pd.Series, *, min_count: int = 10, seed: int = 0) -> np.ndarray:
+    """DRVI's own ``make_balanced_subsample``, ported exactly: every category
+    contributes the same count -- the smallest category's size, floored at
+    `min_count` -- via ``groupby(...).sample(random_state=seed, replace=...)`` (DRVI's
+    own mechanism, hardcoded to ``random_state=0``; kept configurable here), not a
+    separately-seeded draw, so the rows actually selected match DRVI's own output.
     """
-    import matplotlib.pyplot as plt
-
-    image, dims_ordered, titles, blocks = _ordered_latent_matrix(
-        values, categories, dim_stats,
-        title_col=title_col, order_col=order_col, order=order, method=method,
-        remove_vanished=remove_vanished, balance=balance, seed=seed,
+    n_sample_per_cond = int(categories.value_counts().min())
+    n = max(min_count, n_sample_per_cond)
+    return (
+        categories.groupby(categories, observed=True)
+        .sample(n=n, random_state=seed, replace=n_sample_per_cond < n)
+        .index.to_numpy()
     )
 
-    height = max(3.0, min(0.02 * image.shape[0], 14.0))
-    width = max(4.0, 0.15 * len(dims_ordered)) + 1.5
-    fig, ax = plt.subplots(figsize=(width, height))
 
-    im = _draw_latent_heatmap(ax, image, titles, blocks, cmap=cmap)
-    fig.colorbar(im, ax=ax, pad=0.02, fraction=0.03).set_label("value")
+def latent_heatmap(
+    embed,
+    categorical_column: str,
+    *,
+    title_col: str | None = "title",
+    order_col: str | None = "order",
+    sort_by_categorical: bool = False,
+    order: Literal["rank", "cluster"] = "rank",
+    method: str = "average",
+    make_balanced: bool = True,
+    remove_vanished: bool = True,
+    cmap=None,
+    figsize: tuple[float, float] | None = None,
+    seed: int = 0,
+) -> tuple[Figure, Axes]:
+    """Heatmap of latent dimensions (columns) x cells (rows), grouped by `categorical_column`.
+
+    Ported to match ``drvi.utils.pl.plot_latent_dims_in_heatmap``'s own mechanics --
+    same `embed` input, parameter names and defaults (`title_col`, `order_col`,
+    `sort_by_categorical`, `make_balanced`, `remove_vanished`), DRVI's own
+    ``SaturatedRdBu`` colour scale (`cmap`, default
+    :data:`scads_drvi.pl.color.SATURATED_RED_BLUE_CMAP`) centred at 0 and no
+    dendrogram, so it is a comfortable swap-in. `seed` now defaults to 0, matching
+    DRVI's own hardcoded ``make_balanced_subsample`` seed (see :func:`_balanced_rows`),
+    so the balanced subsample actually drawn is the same one DRVI's own call draws.
+    Drawn with :func:`seaborn.heatmap` rather than hand-rolled ``imshow``/ticks/colorbar.
+
+    `sort_by_categorical=True` reproduces DRVI's own heuristic exactly (each dimension
+    ordered by which cell holds its largest-magnitude value). `order="cluster"`
+    (ignored when `sort_by_categorical=True`) is this project's own addition instead of
+    DRVI's default rank ordering: hierarchical clustering of the dimensions by
+    correlation, reusing :func:`_cluster_order` (the same clustering
+    :func:`factor_correlation` uses) -- unlike `sort_by_categorical`, it does not depend
+    on the incidental fact that a balanced subsample happens to come out
+    category-blocked.
+
+    `make_balanced` reproduces DRVI's own ``make_balanced_subsample`` (see
+    :func:`_balanced_rows`): every category contributes the same number of cells, so no
+    single large category dominates the figure.
+    """
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    import seaborn as sns
+
+    from scads_drvi.pl.color import SATURATED_RED_BLUE_CMAP, robust_limits
+
+    cmap = SATURATED_RED_BLUE_CMAP if cmap is None else cmap
+
+    if order_col is not None and order_col not in embed.var.columns:
+        raise KeyError(f"{order_col!r} is not a column of embed.var")
+    if categorical_column not in embed.obs.columns:
+        raise KeyError(f"{categorical_column!r} is not a column of embed.obs")
+    if remove_vanished:
+        if "vanished" not in embed.var.columns:
+            raise KeyError('"vanished" is not a column of embed.var')
+        embed = embed[:, ~embed.var["vanished"].to_numpy(dtype=bool)]
+
+    categories = embed.obs[categorical_column].astype(str)
+    if make_balanced:
+        rows = _balanced_rows(categories, seed=seed)
+        embed = embed[rows]
+        categories = categories.loc[embed.obs_names]
+
+    x = np.asarray(embed.X.toarray() if hasattr(embed.X, "toarray") else embed.X, dtype=float)
+
+    if sort_by_categorical:
+        dim_order = np.argsort(np.abs(x).argmax(axis=0))
+    elif order == "cluster":
+        dim_order = _cluster_order(np.corrcoef(x, rowvar=False), method=method)
+    elif order_col is not None:
+        dim_order = np.argsort(embed.var[order_col].to_numpy())
+    else:
+        dim_order = np.arange(x.shape[1])
+
+    dim_names = np.asarray(embed.var_names)[dim_order]
+    titles = (
+        embed.var[title_col].astype(str).to_numpy()[dim_order]
+        if title_col is not None else dim_names
+    )
+
+    row_order = np.argsort(categories.to_numpy(), kind="stable")
+    image = x[np.ix_(row_order, dim_order)]
+    ordered_categories = categories.to_numpy()[row_order]
+
+    if figsize is None:
+        figsize = (
+            max(4.0, 0.15 * len(dim_order)) + 1.5,
+            max(3.0, min(0.02 * len(row_order), 14.0)),
+        )
+    # constrained_layout is what makes the category labels below (placed in axes-
+    # fraction space, past the right edge of the plotted heatmap) and the colorbar
+    # coexist without the layout engine's default margins clipping one or overlapping
+    # them -- explicit here rather than assumed from a caller's `apply_style()`.
+    fig, ax = plt.subplots(figsize=figsize, layout="constrained")
+
+    vmin, vmax = robust_limits(image, symmetric=True)
+    # cbar=False, then a slim manual colorbar (`fraction=0.03`, matching
+    # factor_correlation/grouped_landscape's own convention elsewhere in this module) --
+    # seaborn's own default colorbar reserves much more width, competing with the
+    # category-label margin below for the same space.
+    sns.heatmap(
+        image, ax=ax, cmap=cmap, vmin=vmin, vmax=vmax, center=0,
+        xticklabels=titles, yticklabels=False, cbar=False,
+    )
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=90, fontsize=6)
+    ax.set_ylabel(f"cells (grouped by {categorical_column})")
+    fig.colorbar(ax.collections[0], ax=ax, pad=0.02, fraction=0.03).set_label("value")
+
+    n_rows = len(row_order)
+    start = 0
+    for slot, name in enumerate(pd.unique(ordered_categories)):
+        stop = start + int((ordered_categories == name).sum())
+        if slot % 2 == 0:
+            ax.axhspan(start, stop, color="#F2F2F2", zorder=0)
+        # axes-fraction, not data coordinates -- independent of wherever the colorbar
+        # ends up. seaborn's heatmap inverts the y-axis (row 0 at the top), so axes
+        # fraction 1 is row 0 and fraction 0 is row `n_rows`.
+        ax.text(
+            1.02, 1.0 - (start + stop) / 2.0 / n_rows, str(name),
+            va="center", ha="left", fontsize=7, transform=ax.transAxes,
+        )
+        start = stop
+
     return fig, ax
 
 
@@ -420,7 +526,7 @@ def latent_heatmap_with_heritability(
     method: str = "average",
     remove_vanished: bool = True,
     balance: int | None = None,
-    cmap: str = "RdBu_r",
+    cmap=None,
     seed: int = 42,
 ) -> tuple[Figure, tuple[Axes, Axes]]:
     """:func:`latent_heatmap`, with a per-dim heritability bar above it, same column order.
@@ -448,6 +554,7 @@ def latent_heatmap_with_heritability(
 
     from scads_drvi.pl.color import (
         DEFAULT_RAMP,
+        SATURATED_RED_BLUE_CMAP,
         Z_HIGH_CONFIDENCE,
         Z_NOMINAL_ONE_TAILED,
         add_threshold_lines,
@@ -455,6 +562,8 @@ def latent_heatmap_with_heritability(
         significance_handles,
     )
     from scads_drvi.stats import bh_threshold_z
+
+    cmap = SATURATED_RED_BLUE_CMAP if cmap is None else cmap
 
     image, dims_ordered, titles, blocks = _ordered_latent_matrix(
         values, categories, dim_stats,
