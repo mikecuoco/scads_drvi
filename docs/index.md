@@ -67,7 +67,7 @@ model.train(max_epochs=200)
 model.save("my_fit/model", overwrite=True)
 
 embed = ad.AnnData(model.get_latent_representation(adata), obs=adata.obs[["cell_type"]].copy())
-embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+embed.var_names = [f"dr_{i}" for i in range(embed.n_vars)]
 model.set_latent_dimension_stats(embed)
 embed.obsm["X_umap"] = umap.UMAP().fit_transform(embed.X)   # set once computed, not read
 embed.uns["provenance"] = {"n_latent": 96}
