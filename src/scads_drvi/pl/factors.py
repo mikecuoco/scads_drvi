@@ -399,7 +399,15 @@ def latent_heatmap(
     cmap=None,
     figsize: tuple[float, float] | None = None,
     seed: int = 0,
-) -> tuple[Figure, Axes]:
+    heritability: pd.Series | None = None,
+    heritability_se: pd.Series | None = None,
+    heritability_q: pd.Series | None = None,
+    heritability_label: str = "coefficient z",
+    alpha: float = 0.05,
+    cell_scores: pd.Series | None = None,
+    cell_score_agg: Literal["mean", "median"] = "mean",
+    cell_score_label: str = "score",
+) -> tuple[Figure, Axes | tuple[Axes, ...]]:
     """Heatmap of latent dimensions (columns) x cells (rows), grouped by `categorical_column`.
 
     Ported to call ``scanpy.pl.heatmap`` directly, the same way DRVI's own
@@ -423,7 +431,21 @@ def latent_heatmap(
     category-blocked.
 
     Returns `scanpy`'s own ``"heatmap_ax"`` as `ax`; its own category color bar
-    (`"groupby_ax"`) lives on the same `fig` alongside it.
+    (`"groupby_ax"`) lives on the same `fig` alongside it. Passing `heritability`
+    (a per-dim Series, indexed like `embed.var_names`, reindexed to this heatmap's own
+    column order) adds a bar above the heatmap -- pass `heritability_se` (same index,
+    e.g. an LDSC `.results` table's own ``Coefficient_std_error``, see
+    :mod:`scads_drvi.enrich.h2_output`) to draw it with error bars, and `heritability_q`
+    (same index) to colour it by BH-significance and draw its boundary line, as
+    :func:`scads_drvi.pl.enrichment.heritability_landscape` does. Passing `cell_scores`
+    (a per-cell Series indexed like `embed.obs_names`) adds a bar to the right showing
+    each `categorical_column` group's `cell_score_agg` of that score, with the group's
+    own standard error of the mean as an error bar -- one bar per group, not per cell,
+    since `scanpy.pl.heatmap` does not expose the exact per-cell row order it draws with
+    (only the per-group block boundaries, which are fully determined by group order and
+    size). Either or both can be omitted; the return value grows to match: `ax` alone by
+    default, `(bar, ax)` with `heritability` only, `(ax, score)` with `cell_scores` only,
+    `(bar, ax, score)` with both.
     """
     import scanpy as sc
 
@@ -463,12 +485,181 @@ def latent_heatmap(
     if figsize is None:
         figsize = (10, len(embed.obs[categorical_column].unique()) / 6)
 
+    # Marginal panels need real inches of their own, not a fraction carved out of
+    # `figsize` -- that figsize is sized only for the heatmap itself (as little as a
+    # fraction of an inch tall for a handful of categories), so reserving a *fraction*
+    # of it would squash both the heatmap and the new panels into nothing.
+    bar_height_in = 1.6
+    score_width_in = 2.0
+    call_figsize = figsize
+    if heritability is not None or cell_scores is not None:
+        call_w, call_h = figsize
+        call_h = max(call_h, 2.0)
+        if heritability is not None:
+            call_h += bar_height_in
+        if cell_scores is not None:
+            call_w += score_width_in
+        call_figsize = (call_w, call_h)
+
     axes = sc.pl.heatmap(
         embed, vars_to_show, categorical_column, gene_symbols=title_col,
-        figsize=figsize, show_gene_labels=True, show=False,
+        figsize=call_figsize, show_gene_labels=True, show=False,
         vcenter=0, cmap=cmap, dendrogram=False,
     )
-    return axes["heatmap_ax"].figure, axes["heatmap_ax"]
+    heat = axes["heatmap_ax"]
+    fig = heat.figure
+
+    bar = None
+    score = None
+    gap = 0.012
+    if heritability is not None or cell_scores is not None:
+        import matplotlib.pyplot as plt
+        import pandas as pd
+        from matplotlib.ticker import MaxNLocator
+
+        adjust: dict[str, float] = {}
+        if heritability is not None:
+            adjust["top"] = 1 - bar_height_in / call_figsize[1]
+        if cell_scores is not None:
+            adjust["right"] = 1 - score_width_in / call_figsize[0]
+        fig.subplots_adjust(**adjust)
+        pos = heat.get_position()
+        # `scanpy.pl.heatmap` draws its own colorbar in a thin axes to the right of
+        # `heat` that it never exposes in the returned dict -- placing `score` right
+        # after `pos.x1` would draw straight over it, so find the true right edge from
+        # every axes scanpy actually created on this figure.
+        right_edge = max(a.get_position().x1 for a in fig.axes)
+
+        if heritability is not None:
+            missing = [d for d in ordered_var.index if d not in heritability.index]
+            if missing:
+                raise KeyError(
+                    f"heritability has no value for {len(missing)} of the heatmap's "
+                    f"factor(s), e.g. {missing[:5]}"
+                )
+            z = heritability.loc[ordered_var.index].to_numpy(dtype=float)
+
+            se = None
+            if heritability_se is not None:
+                missing_se = [d for d in ordered_var.index if d not in heritability_se.index]
+                if missing_se:
+                    raise KeyError(
+                        f"heritability_se has no value for {len(missing_se)} of the "
+                        f"heatmap's factor(s), e.g. {missing_se[:5]}"
+                    )
+                se = heritability_se.loc[ordered_var.index].to_numpy(dtype=float)
+
+            q = None
+            if heritability_q is not None:
+                missing_q = [d for d in ordered_var.index if d not in heritability_q.index]
+                if missing_q:
+                    raise KeyError(
+                        f"heritability_q has no value for {len(missing_q)} of the "
+                        f"heatmap's factor(s), e.g. {missing_q[:5]}"
+                    )
+                q = heritability_q.loc[ordered_var.index].to_numpy(dtype=float)
+
+            from scads_drvi.pl.color import (
+                DEFAULT_RAMP,
+                Z_HIGH_CONFIDENCE,
+                Z_NOMINAL_ONE_TAILED,
+                add_threshold_lines,
+                significance_colors,
+                significance_handles,
+            )
+            from scads_drvi.stats import bh_threshold_z
+
+            bar = fig.add_axes(
+                [pos.x0, pos.y1 + gap, pos.width, 0.97 - (pos.y1 + gap)], sharex=heat
+            )
+            positions = np.arange(len(ordered_var))
+            colors = significance_colors(q, ramp=DEFAULT_RAMP) if q is not None else "#0173B2"
+            bar.bar(
+                positions, z, yerr=se, color=colors, width=0.9, zorder=2,
+                error_kw={"ecolor": "0.2", "elinewidth": 0.8, "capsize": 2},
+            )
+            bar.axhline(0, color="0.3", lw=0.6, zorder=1)
+            for spine in ("top", "right", "bottom"):
+                bar.spines[spine].set_visible(False)
+            bar.tick_params(axis="x", bottom=False, labelbottom=False)
+            bar.tick_params(axis="y", labelsize=6, length=2)
+            bar.yaxis.set_major_locator(MaxNLocator(nbins=3))
+            bar.set_ylabel(heritability_label, fontsize=7)
+            bar.margins(x=0)
+            if q is not None:
+                boundary = bh_threshold_z(q, z, alpha=alpha)
+                add_threshold_lines(
+                    bar, z=(Z_NOMINAL_ONE_TAILED, Z_HIGH_CONFIDENCE), axis="y",
+                    bh=boundary, alpha=alpha,
+                )
+                bar.legend(
+                    handles=significance_handles(DEFAULT_RAMP), frameon=False,
+                    fontsize=6, loc="upper right",
+                )
+
+        if cell_scores is not None:
+            if cell_score_agg not in ("mean", "median"):
+                raise ValueError(
+                    f"cell_score_agg must be 'mean' or 'median', got {cell_score_agg!r}"
+                )
+            missing_cells = [c for c in embed.obs_names if c not in cell_scores.index]
+            if missing_cells:
+                raise KeyError(
+                    f"cell_scores has no value for {len(missing_cells)} of the "
+                    f"heatmap's cell(s), e.g. {missing_cells[:5]}"
+                )
+
+            cats = embed.obs[categorical_column].astype(str)
+            col = embed.obs[categorical_column]
+            if isinstance(col.dtype, pd.CategoricalDtype):
+                cat_order = [str(c) for c in col.cat.categories]
+            else:
+                cat_order = sorted(cats.unique())
+            counts = cats.value_counts().reindex(cat_order).fillna(0).to_numpy(dtype=int)
+            edges = np.concatenate([[0], np.cumsum(counts)])
+            agg = np.mean if cell_score_agg == "mean" else np.median
+            group_values = [
+                cell_scores.loc[cats.index[cats == cat]].to_numpy(dtype=float) for cat in cat_order
+            ]
+            values_by_cat = np.array([agg(v) for v in group_values])
+            sem_by_cat = np.array(
+                [v.std(ddof=1) / np.sqrt(len(v)) if len(v) > 1 else 0.0 for v in group_values]
+            )
+            mids = (edges[:-1] + edges[1:] - 1) / 2.0
+            heights = (edges[1:] - edges[:-1]) * 0.9
+
+            # Reuse scanpy's own per-category palette (the same colours `groupby_ax`'s
+            # colour blocks were just drawn with) when it set one; scanpy only does this
+            # for an already-categorical `obs` column, so fall back to the default color
+            # cycle otherwise -- still one colour per group, just not guaranteed to match.
+            group_colors = embed.uns.get(f"{categorical_column}_colors")
+            if group_colors is None or len(group_colors) != len(cat_order):
+                cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["#0173B2"])
+                group_colors = [cycle[i % len(cycle)] for i in range(len(cat_order))]
+
+            score = fig.add_axes(
+                [right_edge + gap, pos.y0, 0.97 - (right_edge + gap), pos.height], sharey=heat
+            )
+            score.barh(
+                mids, values_by_cat, xerr=sem_by_cat, height=heights, color=group_colors,
+                zorder=2, error_kw={"ecolor": "0.2", "elinewidth": 0.8, "capsize": 2},
+            )
+            score.axvline(0, color="0.3", lw=0.6, zorder=1)
+            for spine in ("top", "right", "left"):
+                score.spines[spine].set_visible(False)
+            score.tick_params(axis="y", left=False, labelleft=False)
+            score.tick_params(axis="x", labelsize=6, length=2)
+            score.xaxis.set_major_locator(MaxNLocator(nbins=3))
+            score.set_xlabel(cell_score_label, fontsize=7)
+            score.margins(y=0)
+
+    if bar is not None and score is not None:
+        return fig, (bar, heat, score)
+    if bar is not None:
+        return fig, (bar, heat)
+    if score is not None:
+        return fig, (heat, score)
+    return fig, heat
 
 
 def latent_heatmap_with_heritability(

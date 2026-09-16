@@ -473,6 +473,128 @@ class TestLatentHeatmap:
         with pytest.raises(KeyError, match="vanished"):
             latent_heatmap(heatmap_embed, "grouping", remove_vanished=True)
 
+    def test_heritability_adds_a_bar_above_sharing_column_order(self, heatmap_embed):
+        rng = np.random.default_rng(6)
+        heritability = pd.Series(
+            rng.normal(size=heatmap_embed.n_vars), index=heatmap_embed.var_names
+        )
+        fig, (bar, ax) = latent_heatmap(
+            heatmap_embed, "grouping", heritability=heritability, make_balanced=False
+        )
+        assert isinstance(fig, Figure)
+        assert bar is not ax
+        assert len(bar.patches) == len(ax.get_xticklabels())
+
+    def test_missing_heritability_value_raises(self, heatmap_embed):
+        rng = np.random.default_rng(6)
+        heritability = pd.Series(
+            rng.normal(size=heatmap_embed.n_vars), index=heatmap_embed.var_names
+        ).drop(heatmap_embed.var_names[0])
+        with pytest.raises(KeyError, match="heritability has no value"):
+            latent_heatmap(
+                heatmap_embed, "grouping", heritability=heritability, make_balanced=False
+            )
+
+    def test_heritability_se_draws_error_bars(self, heatmap_embed):
+        rng = np.random.default_rng(6)
+        heritability = pd.Series(
+            rng.normal(size=heatmap_embed.n_vars), index=heatmap_embed.var_names
+        )
+        se = pd.Series(
+            rng.random(heatmap_embed.n_vars) * 0.5 + 0.1, index=heatmap_embed.var_names
+        )
+        fig, (bar, ax) = latent_heatmap(
+            heatmap_embed, "grouping", heritability=heritability, heritability_se=se,
+            make_balanced=False,
+        )
+        assert bar.containers[0].has_yerr
+
+    def test_missing_heritability_se_value_raises(self, heatmap_embed):
+        rng = np.random.default_rng(6)
+        heritability = pd.Series(
+            rng.normal(size=heatmap_embed.n_vars), index=heatmap_embed.var_names
+        )
+        se = pd.Series(
+            rng.random(heatmap_embed.n_vars), index=heatmap_embed.var_names
+        ).drop(heatmap_embed.var_names[0])
+        with pytest.raises(KeyError, match="heritability_se has no value"):
+            latent_heatmap(
+                heatmap_embed, "grouping", heritability=heritability, heritability_se=se,
+                make_balanced=False,
+            )
+
+    def test_cell_scores_draw_group_sem_error_bars(self, heatmap_embed):
+        rng = np.random.default_rng(7)
+        cell_scores = pd.Series(
+            rng.normal(size=heatmap_embed.n_obs), index=heatmap_embed.obs_names
+        )
+        fig, (ax, score) = latent_heatmap(
+            heatmap_embed, "grouping", cell_scores=cell_scores, make_balanced=False
+        )
+        assert score.containers[0].has_xerr
+
+    def test_heritability_q_colors_and_draws_significance_legend(self, heatmap_embed):
+        rng = np.random.default_rng(6)
+        heritability = pd.Series(
+            rng.normal(size=heatmap_embed.n_vars), index=heatmap_embed.var_names
+        )
+        q = pd.Series(
+            np.linspace(0.001, 0.5, heatmap_embed.n_vars), index=heatmap_embed.var_names
+        )
+        fig, (bar, ax) = latent_heatmap(
+            heatmap_embed, "grouping", heritability=heritability, heritability_q=q,
+            make_balanced=False,
+        )
+        assert bar.legend_ is not None
+        assert bar.lines
+
+    def test_cell_scores_adds_one_bar_per_group_on_the_right(self, heatmap_embed):
+        rng = np.random.default_rng(7)
+        cell_scores = pd.Series(
+            rng.normal(size=heatmap_embed.n_obs), index=heatmap_embed.obs_names
+        )
+        fig, (ax, score) = latent_heatmap(
+            heatmap_embed, "grouping", cell_scores=cell_scores, make_balanced=False
+        )
+        assert isinstance(fig, Figure)
+        assert score is not ax
+        assert len(score.patches) == heatmap_embed.obs["grouping"].nunique()
+
+    def test_missing_cell_score_value_raises(self, heatmap_embed):
+        rng = np.random.default_rng(7)
+        cell_scores = pd.Series(
+            rng.normal(size=heatmap_embed.n_obs), index=heatmap_embed.obs_names
+        ).drop(heatmap_embed.obs_names[0])
+        with pytest.raises(KeyError, match="cell_scores has no value"):
+            latent_heatmap(
+                heatmap_embed, "grouping", cell_scores=cell_scores, make_balanced=False
+            )
+
+    def test_heritability_and_cell_scores_together_return_three_axes(self, heatmap_embed):
+        rng = np.random.default_rng(6)
+        heritability = pd.Series(
+            rng.normal(size=heatmap_embed.n_vars), index=heatmap_embed.var_names
+        )
+        cell_scores = pd.Series(
+            rng.normal(size=heatmap_embed.n_obs), index=heatmap_embed.obs_names
+        )
+        fig, (bar, ax, score) = latent_heatmap(
+            heatmap_embed, "grouping", heritability=heritability, cell_scores=cell_scores,
+            make_balanced=False,
+        )
+        assert len({id(bar), id(ax), id(score)}) == 3
+
+    def test_invalid_cell_score_agg_raises(self, heatmap_embed):
+        rng = np.random.default_rng(7)
+        cell_scores = pd.Series(
+            rng.normal(size=heatmap_embed.n_obs), index=heatmap_embed.obs_names
+        )
+        with pytest.raises(ValueError, match="cell_score_agg"):
+            latent_heatmap(
+                heatmap_embed, "grouping", cell_scores=cell_scores,
+                cell_score_agg="bogus", make_balanced=False,
+            )
+
 
 class TestLatentHeatmapWithHeritability:
     @pytest.fixture
