@@ -184,6 +184,9 @@ def download_and_munge_sumstats(data_dir: Path = DATA, ref_dir: Path | None = No
         "sumstats": str(raw_path),
         "snp": "variant_id", "a1": "effect_allele", "a2": "other_allele",
         "p": "p_value", "signed_sumstats": "beta,0", "N": SUMSTATS_N,
+        # chromosome mixes ints (autosomes) with "X" -- the Rust CSV parser infers one
+        # dtype for the whole column and chokes on it; we don't use this column anyway.
+        "ignore": "chromosome",
         "merge_alleles": str(ref_dir / "w_hm3.snplist"),
         "out": str(sumstats_dir / "ra_ishigaki2022_eur"),
     }, binary=ldsc_bin)
