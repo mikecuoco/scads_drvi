@@ -6,10 +6,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-# The three jobs mirror the three real environments this package is deployed into.
-# Running in more than one is not belt-and-braces: it is how two real bugs were found
-# (pandas 3 StringDtype vs np.issubdtype, and numpy 2 histogram binning), each of which
-# passed in one stack and failed in another.
 jobs:
   lint:
     name: lint
@@ -25,35 +21,12 @@ jobs:
       - run: ruff check --output-format=github .
 
   test:
-    name: ${{ matrix.name }}
+    name: python ${{ matrix.python }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Mirrors env-scads: the enrichment stages run with no torch, no matplotlib,
-          # no seaborn and no h5py, and must still import and use the loaders, statistics
-          # and scoring. test_import_surface.py asserts exactly this.
-          - name: core (numpy 2, pandas 3, no optional deps)
-            python: "3.12"
-            deps: numpy pandas scipy pyyaml
-
-          # Mirrors env-qc-notebook: the declared dependency floors. Raised to match
-          # scanpy's own floor (Requires-Python>=3.12, numpy>=2, pandas>=2.3,
-          # matplotlib>=3.10 as of scanpy 1.12.4) rather than pinning an older scanpy
-          # or keeping it optional -- pl/ now wraps scanpy.pl.embedding for every
-          # embedding figure. scipy==1.13.0 (one step past scanpy's own floor): the
-          # first scipy release compatible with numpy 2 -- scipy==1.11.4 caps
-          # numpy<1.28, unresolvable alongside numpy>=2.
-          - name: floors (numpy 2.0, pandas 2.3, scanpy 1.12.4)
-            python: "3.12"
-            deps: numpy==2.0.0 pandas==2.3.0 scipy==1.13.0 pyyaml h5py anndata matplotlib==3.10.0 seaborn scanpy==1.12.4
-
-          # Mirrors env-scvi minus torch/scvi-tools, which are multi-GB and gate only the
-          # model-access tests; those skip cleanly when torch is absent.
-          - name: current (numpy 2, pandas 3, plotting + h5ad)
-            python: "3.12"
-            deps: numpy pandas scipy pyyaml h5py anndata matplotlib seaborn scanpy
+        python: ["3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v7
@@ -62,17 +35,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      # Dependencies are installed explicitly rather than via `pip install .` -- this
-      # package's own hard dependencies are numpy/pandas/scipy/pyyaml/h5py/anndata/
-      # matplotlib/seaborn/scanpy only. torch/scvi-tools/drvi-py live in the optional
-      # `drvi` extra (nothing in this package imports them; training/loading a DRVI
-      # model is the caller's own job against `scvi.external.DRVI` directly) and are
-      # never installed here.
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install ${{ matrix.deps }} pytest
-          python -m pip install --no-deps -e .
+      # The full declared install: every hard dependency, plus the `test` extra.
+      # `drvi` (torch/scvi-tools/drvi-py) stays out: nothing in this package
+      # imports them -- training/loading a DRVI model is the caller's own job
+      # against `scvi.external.DRVI` directly.
+      - name: Install
+        run: python -m pip install -e '.[test]'
 
       - name: Show resolved versions
         run: python -m pip list

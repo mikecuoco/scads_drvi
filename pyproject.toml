@@ -36,6 +36,13 @@ dependencies = [
     "matplotlib>=3.10",
     "seaborn>=0.13",
     "scanpy>=1.12",
+    # annotate.motif's region-overlap mapping (build_region_map). A hard dependency
+    # rather than an extra: bioframe's own declared deps are matplotlib, numpy,
+    # pandas, pyyaml and requests -- everything but requests is already required
+    # here, so gating it behind an extra would buy nothing.
+    "bioframe>=0.6",
+    # annotate.motif's score-database streaming (stream_accumulate and friends).
+    "pyarrow>=14",
 ]
 
 # torch/scvi-tools/drvi-py are not imported anywhere in this package (training and
@@ -46,10 +53,6 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=7.4"]
 drvi = ["scvi-tools>=1.5", "torch>=2.4", "drvi-py>=0.2.7"]
-# scads_drvi.annotate.motif's region-database streaming and overlap mapping. Function-
-# local imports (see the import-surface discipline in test_import_surface.py), so
-# importing the module needs neither; only calling stream_accumulate/build_region_map do.
-annotate = ["pyarrow>=14", "pyranges>=0.0.100,<1"]
 docs = [
     "sphinx>=7.3",
     "sphinx-book-theme>=1.1",

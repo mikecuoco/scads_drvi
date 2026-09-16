@@ -213,14 +213,14 @@ def build_region_map(
 
     A pair counts as a match if EITHER side's overlap fraction exceeds
     `fraction_overlap` (the rule pycisTarget's DEM route uses; reproduced here directly
-    on `pyranges` so this module depends on it rather than on `pycistarget` for two
+    on `bioframe` so this module depends on it rather than on `pycistarget` for two
     helper functions).
 
     Returns `(used_cols, peak_rows, region_names)`: `used_cols` are DATABASE COLUMN
     INDICES (sorted, into `db_region_names`), and `peak_rows` is, per used region, the
     array of `peaks` indices overlapping it.
     """
-    import pyranges as pr
+    import bioframe
 
     from scads_drvi.enrich.config import parse_peaks
 
@@ -228,30 +228,27 @@ def build_region_map(
     peaks = list(peaks)
     db_region_names = list(db_region_names)
 
-    def _pyranges(names: Sequence[str]) -> pr.PyRanges:
-        coords = parse_peaks(names)
-        return pr.PyRanges(
-            chromosomes=coords["chrom"], starts=coords["start"], ends=coords["end"]
-        )
-
-    joined = _pyranges(peaks).join(_pyranges(db_region_names), report_overlap=True)
+    joined = bioframe.overlap(
+        parse_peaks(peaks), parse_peaks(db_region_names),
+        how="inner", return_overlap=True, suffixes=("_1", "_2"),
+    )
     if len(joined) == 0:
         raise ValueError(
             "no overlap between the two region sets -- check they share a genome "
             "build and chromosome naming."
         )
-    df = joined.df
-    overlap_target = df["Overlap"] / (df["End"] - df["Start"])
-    overlap_query = df["Overlap"] / (df["End_b"] - df["Start_b"])
-    df = df[(overlap_target > fraction_overlap) | (overlap_query > fraction_overlap)]
+    overlap_len = joined["overlap_end"] - joined["overlap_start"]
+    overlap_target = overlap_len / (joined["end_1"] - joined["start_1"])
+    overlap_query = overlap_len / (joined["end_2"] - joined["start_2"])
+    joined = joined[(overlap_target > fraction_overlap) | (overlap_query > fraction_overlap)]
 
     target_names = [
         _format_peak(c, s, e)
-        for c, s, e in zip(df["Chromosome"], df["Start"], df["End"], strict=True)
+        for c, s, e in zip(joined["chrom_1"], joined["start_1"], joined["end_1"], strict=True)
     ]
     query_names = [
         _format_peak(c, s, e)
-        for c, s, e in zip(df["Chromosome"], df["Start_b"], df["End_b"], strict=True)
+        for c, s, e in zip(joined["chrom_2"], joined["start_2"], joined["end_2"], strict=True)
     ]
 
     col_of = {name: i for i, name in enumerate(db_region_names)}

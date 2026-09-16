@@ -36,7 +36,7 @@ import pandas as pd
 import pytest
 
 pytest.importorskip("pyarrow")
-pytest.importorskip("pyranges")
+pytest.importorskip("bioframe")
 
 from scads_drvi.annotate.motif import (
     build_region_map,

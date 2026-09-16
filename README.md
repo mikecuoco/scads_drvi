@@ -151,7 +151,7 @@ lazily. Heavy dependencies are confined by directory:
 | module | needs |
 |---|---|
 | `pl/` | `matplotlib`, `seaborn`, `scanpy` (→ `anndata`), function-local |
-| `annotate/` | `pyarrow`, `pyranges`, function-local (the `annotate` extra; only `stream_accumulate`/`build_region_map` need them, not the module import) |
+| `annotate/` | `pyarrow`/`bioframe`, both hard dependencies now (`bioframe`'s own declared deps are already required here except `requests`) but still function-local -- importing the module needs neither, only `stream_accumulate`/`build_region_map` do |
 | everything else | numpy / pandas / scipy / pyyaml |
 
 This is not cosmetic. The environment that runs the enrichment stages has no torch, no
