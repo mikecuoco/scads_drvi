@@ -5,14 +5,18 @@ pipeline -- overlap mapping, regionising, stratification, streaming, NES -- runs
 correctly on a real genome's real region names, using the same public 10x PBMC
 multiome sample `docs/tutorials/pbmc.ipynb` builds the whole package's tutorial on.
 
-No real motif-score database or DRVI fit is required: the score database is a small
-synthetic Feather file built over TRANSLATED copies of the real peak coordinates (so
-`build_region_map`'s overlap logic is genuinely exercised, not a trivial identity
-join), and the "factor" is peak width -- a real, non-random per-peak quantity standing
-in for a DRVI factor's loadings.
+Two tests, both `@pytest.mark.data` and self-skipping (not failing the run) when
+their resource isn't available -- `test_ldsc_binary.py`'s pattern for the real LDSC
+binary:
 
-``@pytest.mark.data``: skips itself (not the whole run) when the dataset isn't
-reachable, the same pattern ``test_ldsc_binary.py`` uses for the real LDSC binary.
+- against a small SYNTHETIC score database built over translated copies of the real
+  peak coordinates, requiring nothing beyond network access to the public 10x sample;
+- against the REAL production cisTarget-style score database and REAL genome FASTA
+  the method was ported from, opt-in via env vars (see the second test's docstring).
+
+Neither needs a DRVI fit: the "factor" in both is peak width -- a real, non-random
+per-peak quantity standing in for a DRVI factor's loadings. The mechanics under test
+don't care where the weights came from.
 """
 
 from __future__ import annotations
@@ -32,9 +36,12 @@ pytest.importorskip("pyranges")
 from scads_drvi.annotate.motif import (
     build_region_map,
     covariate_strata,
+    gc_width_strata,
+    read_score_db_regions,
     regionise,
     weighted_motif_enrichment,
 )
+from scads_drvi.annotate.resources import ensure_screen_database
 from scads_drvi.enrich.config import parse_peaks
 
 PBMC_URL = (
@@ -150,5 +157,63 @@ def test_weighted_motif_enrichment_on_real_pbmc_peak_coordinates(tmp_path, real_
     assert meta["n_motifs"] == len(motif_ids)
     assert len(rows) == len(motif_ids)
     assert set(rows["motif_id"]) == set(motif_ids)
+    assert np.isfinite(rows["nes"]).all()
+    assert np.isfinite(rows["weighted_score"]).all()
+
+
+@pytest.mark.data
+def test_weighted_motif_enrichment_against_the_real_cistarget_database(real_pbmc_peaks):
+    """The same real PBMC peaks, against a REAL production cisTarget-style score
+    database and REAL GC content -- not a stand-in for either.
+
+    The database resolves through `ensure_screen_database`: an existing copy at
+    `$SCADS_DRVI_CACHE` (or the default `~/.cache/scads_drvi/...`) is used as-is;
+    otherwise this skips unless `SCADS_DRVI_DOWNLOAD_REAL_DB=1` opts into fetching the
+    ~14 GB file fresh. The genome FASTA has no downloader (see `annotate.gc`'s
+    docstring) -- set `SCADS_DRVI_REAL_GENOME_FASTA` to a real, `samtools faidx`-ed
+    hg38 FASTA to run this at all; it skips everywhere else.
+
+    A single contiguous pass over the real database takes a few minutes and needs
+    real memory (a 100k-column slab at this database's motif count is several GB in
+    float32) -- run this under a scheduler (see `submit_real_db_test.sh`'s resource
+    shape: 8 cpus, 64G), never inline on a small interactive allocation.
+    """
+    genome_fasta = os.environ.get("SCADS_DRVI_REAL_GENOME_FASTA")
+    if not genome_fasta or not Path(genome_fasta).exists():
+        pytest.skip(
+            "set SCADS_DRVI_REAL_GENOME_FASTA to a real, faidx-ed hg38 FASTA to run "
+            "against the real database"
+        )
+
+    try:
+        db_path = ensure_screen_database(
+            cache=os.environ.get("SCADS_DRVI_REAL_MOTIF_DB_CACHE"),
+            allow_download=os.environ.get("SCADS_DRVI_DOWNLOAD_REAL_DB") == "1",
+        )
+    except FileNotFoundError as exc:
+        pytest.skip(str(exc))
+
+    peaks = real_pbmc_peaks
+    coords = parse_peaks(peaks)
+    # Peak width, again -- a real, non-random per-peak quantity standing in for a
+    # DRVI factor's loadings (see the sibling synthetic-database test above).
+    W = (coords["end"] - coords["start"]).to_numpy(dtype=np.float64)[None, :]
+    labels = ["width_pseudo_factor"]
+
+    db_region_names = read_score_db_regions(db_path)
+    used_cols, peak_rows, region_names = build_region_map(peaks, db_region_names)
+    Wr = regionise(W, peak_rows)
+
+    keep, strata_ix, n_strata = gc_width_strata(region_names, genome_fasta)
+    used_cols, Wr = used_cols[keep], Wr[:, keep]
+    region_names = [r for r, k in zip(region_names, keep, strict=True) if k]
+
+    rows, meta = weighted_motif_enrichment(
+        Wr, labels, used_cols, region_names, strata_ix, n_strata, db_path,
+        check_invariance=True,
+    )
+
+    assert meta["n_factors"] == 1
+    assert len(rows) == meta["n_motifs"]
     assert np.isfinite(rows["nes"]).all()
     assert np.isfinite(rows["weighted_score"]).all()
