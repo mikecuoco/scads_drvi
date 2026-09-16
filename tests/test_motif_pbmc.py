@@ -17,6 +17,10 @@ binary:
 Neither needs a DRVI fit: the "factor" in both is peak width -- a real, non-random
 per-peak quantity standing in for a DRVI factor's loadings. The mechanics under test
 don't care where the weights came from.
+
+The synthetic-database test also proves the result round-trips through a plain
+`AnnData.write_h5ad`/`read_h5ad`, stored at `uns["annotate"]["motif"]` the same way
+`enrich`'s results already live at `uns["enrich"][trait]` -- no wrapper, here either.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ import urllib.request
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 pytest.importorskip("pyarrow")
@@ -159,6 +164,20 @@ def test_weighted_motif_enrichment_on_real_pbmc_peak_coordinates(tmp_path, real_
     assert set(rows["motif_id"]) == set(motif_ids)
     assert np.isfinite(rows["nes"]).all()
     assert np.isfinite(rows["weighted_score"]).all()
+
+    # Stored the same way `enrich`'s results already are (`embed.uns["enrich"][trait]`,
+    # a plain dict, a bare write_h5ad -- see pbmc.ipynb's Enrich section): no wrapper
+    # here either, just proving the real pipeline's own output round-trips.
+    import anndata as ad
+
+    embed = ad.AnnData(np.zeros((1, len(labels))))
+    embed.uns.setdefault("annotate", {})["motif"] = {"results": rows, "meta": meta}
+    h5ad_path = tmp_path / "result.h5ad"
+    embed.write_h5ad(h5ad_path)
+
+    reloaded = ad.read_h5ad(h5ad_path).uns["annotate"]["motif"]
+    pd.testing.assert_frame_equal(reloaded["results"], rows)
+    assert reloaded["meta"] == meta
 
 
 @pytest.mark.data
