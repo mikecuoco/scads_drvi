@@ -160,6 +160,25 @@ def provision_ldsc_reference(data_dir: Path = DATA) -> Path:
             next(f_in)  # header
             for line in f_in:
                 f_out.write(line.split("\t", 1)[0] + "\n")
+
+    # baselineLD_v2.2's own annot files (from the standard Alkes-group distribution,
+    # not written by this package) carry CM as bare "0" for early low-recombination
+    # SNPs and only turn fractional later -- the Rust h2 --overlap-annot reader infers
+    # one dtype from a leading sample and then fails on the mix. force_decimal is
+    # scads_drvi's own fix for exactly this (see enrich.annotations); apply it once to
+    # the reference's files too, since we don't control how they were originally written.
+    fixed_marker = dest / "baselineLD_v2.2" / ".cm_fixed"
+    if not fixed_marker.exists():
+        import pandas as pd
+
+        from scads_drvi.enrich.annotations import force_decimal
+
+        print("fixing non-decimal CM column in baselineLD_v2.2 annot files...")
+        for chrom in range(1, 23):
+            annot_path = dest / "baselineLD_v2.2" / f"baselineLD.{chrom}.annot.gz"
+            df = force_decimal(pd.read_csv(annot_path, sep="\t"), columns=["CM"])
+            df.to_csv(annot_path, sep="\t", index=False, compression="gzip")
+        fixed_marker.write_text("")
     return dest
 
 
