@@ -105,7 +105,7 @@ def prepare_atac_rna(matrix_path: Path, data_dir: Path = DATA) -> tuple[Path, Pa
     sc.pp.pca(rna, n_comps=30, mask_var="highly_variable")
     sc.pp.neighbors(rna, n_neighbors=15)
     sc.tl.umap(rna, min_dist=0.3, spread=1.0)
-    sc.tl.leiden(rna, resolution=0.5, flavor="igraph", n_iterations=2)
+    sc.tl.leiden(rna, resolution=0.5, flavor="leidenalg", n_iterations=2)
 
     MARKERS = {
         "CD4 T": ["IL7R", "CD3D", "CD3E", "CD4"],
