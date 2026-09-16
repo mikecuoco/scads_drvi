@@ -9,4 +9,5 @@ API Reference
    stats
    enrich
    scores
+   annotate
    pl
