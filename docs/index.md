@@ -35,6 +35,7 @@ takes an explicit path, a bare read is just `anndata.read_h5ad(path)`, a write i
 | `enrich.config` | enrichment config loading and factor selection |
 | `enrich.ldsc` | read `.results` files into one tidy `dim`/`direction`/`trait` table |
 | `scores.cell` / `.aggregate` | the two `CS_i` formulas; group summaries and matrices |
+| `annotate.motif` / `.gc` | weighted factor-motif enrichment against a region x motif score database, calibrated by an exact (never sampled) permutation null |
 | `pl.*` | style, colour policy, frugal boxes, and every figure — including its own in-house per-dimension UMAP grid, stats plot and category heatmap |
 
 Where DRVI's own package (`drvi-py`) already computes something — per-dimension
