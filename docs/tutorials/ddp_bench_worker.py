@@ -115,7 +115,7 @@ def main() -> None:
         model.get_latent_representation(atac),
         obs=atac.obs[["n_genes_by_counts", "total_counts"]].copy(),
     )
-    embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+    embed.var_names = [f"dr_{i}" for i in range(embed.n_vars)]
     model.set_latent_dimension_stats(embed, vanished_threshold=0.5)
 
     for split, df in model.history.items():
