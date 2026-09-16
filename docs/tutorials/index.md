@@ -4,7 +4,8 @@ One notebook, run end to end on a real public dataset: a 10x Genomics PBMC scATA
 sample. It walks the full pipeline in order, with no synthetic stand-ins except where
 the underlying inputs (a GWAS trait's summary statistics, a reference LD panel) are
 themselves an external data-acquisition step rather than something this package
-computes:
+computes. A second notebook trains that same fit under multi-GPU DDP and benchmarks it
+against a single-GPU baseline.
 
 ```
 peaks × cells (10x PBMC scATAC)
@@ -29,4 +30,5 @@ tree a configuration object derives paths into.
 :maxdepth: 1
 
 pbmc
+ddp_benchmark
 ```
