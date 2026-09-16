@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -99,10 +100,10 @@ def _format_metadata(fmt: str, metadata: Mapping[str, str]) -> dict:
 
 def figure_metadata(**fields: str) -> dict[str, str]:
     """Provenance fields for :func:`save_figure`, with a UTC timestamp added."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     out = {k: str(v) for k, v in fields.items() if v is not None}
-    out.setdefault("created", datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    out.setdefault("created", datetime.now(UTC).isoformat(timespec="seconds"))
     return out
 
 
