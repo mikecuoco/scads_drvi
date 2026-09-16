@@ -6,6 +6,22 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **`pl.umap.latent_umap_grid`/`pl.factors.latent_dimension_stats`/`latent_heatmap` now
+  match DRVI's own `plot_latent_dims_in_umap`/`plot_latent_dimension_stats`/
+  `plot_latent_dims_in_heatmap` exactly**, not just in spirit: DRVI's own
+  `SaturatedRdBu`/`SaturatedSky` colormaps (copied verbatim into
+  `pl.color.SATURATED_RED_BLUE_CMAP`/`SATURATED_SKY_CMAP`/`SATURATED_JUST_SKY_CMAP`),
+  per-dimension colour limits from `embed.var["min"]`/`["max"]` (in place of this
+  project's own robust percentile limits), the directional +/- split built the same
+  way DRVI builds it (`ad.concat`-ing a negated copy of `embed`, not a temporary `obs`
+  column), DRVI's own panel-title-inside-the-axes trick, and DRVI's own hardcoded
+  black/blue vanished/kept dot colours and `"Rank based on Explanation Share"` x-axis
+  label. `latent_heatmap`'s balanced subsample now uses DRVI's own
+  `groupby(...).sample(random_state=0, ...)` mechanism (`seed` default changed
+  `42` -> `0` to match) rather than a separately-seeded draw. `dim_subset` still names
+  raw `embed.var_names`, not DRVI's own title-keyed `dim_subset`; the layout-safe
+  figure legend a past fix already put in `latent_dimension_stats` (avoiding a real
+  `bbox_to_anchor` overlap bug) is kept rather than reverted to DRVI's own positioning.
 - **Breaking: `enrich.embed` is deleted.** `write_result`, `read_feature_loadings`,
   `attach_enrich_results` and `directional_loadings` were the module's whole surface;
   each was a thin wrapper a caller can write inline just as easily -- a write is
