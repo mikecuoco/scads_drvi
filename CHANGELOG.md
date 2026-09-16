@@ -6,6 +6,31 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **`pl.factors.latent_heatmap` gains optional heritability/cell-score marginal panels
+  and a directional split, rather than a second `latent_heatmap_with_heritability`
+  (kept, unchanged, for callers without an `embed` `AnnData`).** `heritability`/
+  `heritability_se`/`heritability_q` (per-dim `pd.Series`, reindexed to the heatmap's
+  own column order) draw a bar above the heatmap, with error bars and BH-significance
+  colouring/boundary lines matching `pl.enrichment.heritability_landscape`.
+  `cell_scores`/`cell_score_agg` (`"mean"`/`"median"`/`"sum"`)/`cell_score_label` draw a
+  bar to the right, one per `categorical_column` group (not per cell -- `scanpy.pl.
+  heatmap` never exposes the per-cell row order it actually draws with, only the
+  per-group block boundaries, which are fully determined by group order/size), with an
+  error bar of its own (SEM for `"mean"`/`"median"`, `sqrt(n) * std` for `"sum"`'s
+  un-normalised group total). `directional` (**default `True`**) splits every kept
+  dimension into two columns, `"{dim}+"`/`"{dim}-"`, a ReLU'd positive part and a
+  ReLU'd negative part -- the same split DRVI's own
+  `get_effect_of_splits_within_distribution` and this package's `enrich`/`scores`
+  modules already use, not `latent_umap_grid`'s whole-column negation (which serves a
+  colour-scale need a heatmap's already-diverging colourmap doesn't have). Passing
+  `cell_scores` also relocates `scanpy`'s own colorbar, previously sandwiched between
+  the heatmap and the new cell-score bar, to the figure's top right corner. The return
+  value grows to match what was requested (`ax`, `(bar, ax)`, `(ax, score)`, or
+  `(bar, ax, score)`).
+- **Breaking: `pl.umap.latent_umap_grid`'s `directional` now defaults to `True`.**
+  Every factor interpretability plot in this package now shows split factors by
+  default; pass `directional=False` for the previous one-panel/one-column-per-
+  dimension view.
 - **`pl.umap.latent_umap_grid`/`pl.factors.latent_dimension_stats`/`latent_heatmap` now
   match DRVI's own `plot_latent_dims_in_umap`/`plot_latent_dimension_stats`/
   `plot_latent_dims_in_heatmap` exactly**, not just in spirit: DRVI's own

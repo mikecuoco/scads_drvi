@@ -145,18 +145,21 @@ class TestSubsample:
 
 class TestLatentUmapGrid:
     def test_returns_one_panel_per_kept_dim(self, embed):
-        fig = latent_umap_grid(embed, n=500)
+        fig = latent_umap_grid(embed, directional=False, n=500)
         n_kept = int((~embed.var["vanished"]).sum())
         # each panel is (scatter axis, colorbar axis)
         assert len(fig.axes) == 2 * n_kept
 
     def test_directional_doubles_the_panel_count(self, embed):
+        # directional=True is now the default -- every factor interpretability plot
+        # shows split factors unless told not to -- so this compares against the
+        # directional=False count explicitly instead of assuming it.
         fig = latent_umap_grid(embed, directional=True, n=500)
-        n_kept = int((~embed.var["vanished"]).sum())
-        assert len(fig.axes) == 2 * (2 * n_kept)
+        fig_plain = latent_umap_grid(embed, directional=False, n=500)
+        assert len(fig.axes) == 2 * len(fig_plain.axes)
 
     def test_dim_subset_restricts_dims(self, embed):
-        fig = latent_umap_grid(embed, dim_subset=["dim_0", "dim_1"], n=500)
+        fig = latent_umap_grid(embed, dim_subset=["dim_0", "dim_1"], directional=False, n=500)
         assert len(fig.axes) == 2 * 2
 
     def test_missing_order_col_raises(self, embed):
@@ -420,7 +423,8 @@ class TestLatentHeatmap:
 
     def test_column_labels_match_titles_in_rank_order(self, heatmap_embed):
         _, ax = latent_heatmap(
-            heatmap_embed, "grouping", remove_vanished=False, make_balanced=False
+            heatmap_embed, "grouping", remove_vanished=False, make_balanced=False,
+            directional=False,
         )
         labels = [t.get_text() for t in ax.get_xticklabels()]
         kept = heatmap_embed.var.sort_values("order")
@@ -454,7 +458,8 @@ class TestLatentHeatmap:
             np.argsort(np.abs(np.asarray(kept.X)).argmax(axis=0))
         ]
         _, ax = latent_heatmap(
-            heatmap_embed, "grouping", sort_by_categorical=True, make_balanced=False
+            heatmap_embed, "grouping", sort_by_categorical=True, make_balanced=False,
+            directional=False,
         )
         labels = [t.get_text() for t in ax.get_xticklabels()]
         assert labels == list(expected)
@@ -479,7 +484,8 @@ class TestLatentHeatmap:
             rng.normal(size=heatmap_embed.n_vars), index=heatmap_embed.var_names
         )
         fig, (bar, ax) = latent_heatmap(
-            heatmap_embed, "grouping", heritability=heritability, make_balanced=False
+            heatmap_embed, "grouping", heritability=heritability, make_balanced=False,
+            directional=False,
         )
         assert isinstance(fig, Figure)
         assert bar is not ax
@@ -492,7 +498,8 @@ class TestLatentHeatmap:
         ).drop(heatmap_embed.var_names[0])
         with pytest.raises(KeyError, match="heritability has no value"):
             latent_heatmap(
-                heatmap_embed, "grouping", heritability=heritability, make_balanced=False
+                heatmap_embed, "grouping", heritability=heritability, make_balanced=False,
+                directional=False,
             )
 
     def test_heritability_se_draws_error_bars(self, heatmap_embed):
@@ -505,7 +512,7 @@ class TestLatentHeatmap:
         )
         fig, (bar, ax) = latent_heatmap(
             heatmap_embed, "grouping", heritability=heritability, heritability_se=se,
-            make_balanced=False,
+            make_balanced=False, directional=False,
         )
         assert bar.containers[0].has_yerr
 
@@ -520,7 +527,7 @@ class TestLatentHeatmap:
         with pytest.raises(KeyError, match="heritability_se has no value"):
             latent_heatmap(
                 heatmap_embed, "grouping", heritability=heritability, heritability_se=se,
-                make_balanced=False,
+                make_balanced=False, directional=False,
             )
 
     def test_cell_scores_draw_group_sem_error_bars(self, heatmap_embed):
@@ -543,7 +550,7 @@ class TestLatentHeatmap:
         )
         fig, (bar, ax) = latent_heatmap(
             heatmap_embed, "grouping", heritability=heritability, heritability_q=q,
-            make_balanced=False,
+            make_balanced=False, directional=False,
         )
         assert bar.legend_ is not None
         assert bar.lines
@@ -580,7 +587,7 @@ class TestLatentHeatmap:
         )
         fig, (bar, ax, score) = latent_heatmap(
             heatmap_embed, "grouping", heritability=heritability, cell_scores=cell_scores,
-            make_balanced=False,
+            make_balanced=False, directional=False,
         )
         assert len({id(bar), id(ax), id(score)}) == 3
 
@@ -594,6 +601,59 @@ class TestLatentHeatmap:
                 heatmap_embed, "grouping", cell_scores=cell_scores,
                 cell_score_agg="bogus", make_balanced=False,
             )
+
+    def test_directional_is_the_default_and_doubles_columns(self, heatmap_embed):
+        _, ax_split = latent_heatmap(heatmap_embed, "grouping", make_balanced=False)
+        _, ax_plain = latent_heatmap(
+            heatmap_embed, "grouping", make_balanced=False, directional=False
+        )
+        assert len(ax_split.get_xticklabels()) == 2 * len(ax_plain.get_xticklabels())
+
+    def test_directional_titles_get_plus_minus_suffix(self, heatmap_embed):
+        _, ax = latent_heatmap(heatmap_embed, "grouping", make_balanced=False)
+        labels = [t.get_text() for t in ax.get_xticklabels()]
+        assert labels  # non-empty
+        assert all(label.endswith(("+", "-")) for label in labels)
+
+    def test_directional_heritability_uses_plus_minus_index(self, heatmap_embed):
+        rng = np.random.default_rng(6)
+        kept = heatmap_embed.var_names[~heatmap_embed.var["vanished"].to_numpy(dtype=bool)]
+        signed = [f"{d}{sign}" for d in kept for sign in ("+", "-")]
+        heritability = pd.Series(rng.normal(size=len(signed)), index=signed)
+        fig, (bar, ax) = latent_heatmap(
+            heatmap_embed, "grouping", heritability=heritability, make_balanced=False
+        )
+        assert len(bar.patches) == len(ax.get_xticklabels()) == len(signed)
+
+    def test_cell_score_agg_sum_uses_raw_group_totals(self, heatmap_embed):
+        rng = np.random.default_rng(7)
+        cell_scores = pd.Series(
+            rng.normal(size=heatmap_embed.n_obs), index=heatmap_embed.obs_names
+        )
+        fig, (ax, score) = latent_heatmap(
+            heatmap_embed, "grouping", cell_scores=cell_scores, cell_score_agg="sum",
+            make_balanced=False,
+        )
+        expected = cell_scores.groupby(heatmap_embed.obs["grouping"]).sum()
+        actual = sorted(b.get_width() for b in score.patches)
+        np.testing.assert_allclose(actual, sorted(expected.to_numpy()))
+
+    def test_colorbar_moves_to_top_right_when_cell_scores_shown(self, heatmap_embed):
+        rng = np.random.default_rng(7)
+        cell_scores = pd.Series(
+            rng.normal(size=heatmap_embed.n_obs), index=heatmap_embed.obs_names
+        )
+        fig, (ax, score) = latent_heatmap(
+            heatmap_embed, "grouping", cell_scores=cell_scores, make_balanced=False
+        )
+        # the relocated colorbar is a small box flush against the figure's top right
+        # corner -- distinct from the heatmap/groupby/score axes, which all sit well
+        # inside the figure.
+        assert any(
+            a.get_position().x1 > 0.9 and a.get_position().y1 > 0.9
+            and a.get_position().width < 0.2
+            for a in fig.axes
+        )
 
 
 class TestLatentHeatmapWithHeritability:

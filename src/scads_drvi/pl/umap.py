@@ -102,7 +102,7 @@ def latent_umap_grid(
     embed: AnnData,
     *,
     dim_subset: Sequence[str] | None = None,
-    directional: bool = False,
+    directional: bool = True,
     remove_vanished: bool = True,
     order_col: str = "order",
     title_col: str = "title",
@@ -126,6 +126,11 @@ def latent_umap_grid(
     of `embed` (`ad.concat`), not a temporary ``obs`` column -- and DRVI's own trick of
     moving each panel's title into the plot itself (`rearrange_titles`) with the
     negative panel's y-axis (colorbar) flipped and relabelled.
+
+    `directional` defaults to `True` -- every factor interpretability plot in this
+    package shows split factors by default (see also
+    :func:`scads_drvi.pl.factors.latent_heatmap`'s own `directional`); pass
+    `directional=False` for the older single-panel-per-dimension view.
 
     `dim_subset` still names raw `embed.var_names` (this project's own convention
     throughout), not `title_col` values as DRVI's own `dim_subset` does.

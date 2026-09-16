@@ -385,6 +385,42 @@ def _balanced_rows(categories: pd.Series, *, min_count: int = 10, seed: int = 0)
     )
 
 
+def _directional_split(embed, *, title_col: str | None, order_col: str | None):
+    """Every kept dimension becomes two columns, ``"{dim}+"``/``"{dim}-"`` -- a ReLU'd
+    positive part and a ReLU'd negative part (as a positive magnitude), zero elsewhere.
+
+    The same directional split DRVI's own ``get_effect_of_splits_within_distribution``
+    produces and this package's own `enrich`/`scores` modules already build by hand
+    (``np.clip(embed.X, 0, None)``/``np.clip(-embed.X, 0, None)``) -- not
+    :func:`scads_drvi.pl.umap.latent_umap_grid`'s directional split, which negates the
+    *whole* column for its own colour-scale reasons rather than zeroing out either half;
+    a heatmap's diverging colour already encodes sign, so the useful new information
+    here is which cells actually carry each direction's loading, not a recoloured copy
+    of the same values.
+    """
+    import anndata as ad
+    import pandas as pd
+
+    x = np.asarray(embed.X.toarray() if hasattr(embed.X, "toarray") else embed.X, dtype=float)
+    pos_x, neg_x = np.clip(x, 0, None), np.clip(-x, 0, None)
+
+    pos_var, neg_var = embed.var.copy(), embed.var.copy()
+    pos_var.index = pd.Index([f"{i}+" for i in embed.var_names])
+    neg_var.index = pd.Index([f"{i}-" for i in embed.var_names])
+    if title_col is not None and title_col in embed.var.columns:
+        pos_var[title_col] = pos_var[title_col].astype(str) + "+"
+        neg_var[title_col] = neg_var[title_col].astype(str) + "-"
+    if order_col is not None and order_col in embed.var.columns:
+        pos_var[order_col] = pos_var[order_col] + 1e-8
+        neg_var[order_col] = neg_var[order_col] - 1e-8
+
+    return ad.AnnData(
+        X=np.concatenate([pos_x, neg_x], axis=1),
+        obs=embed.obs,
+        var=pd.concat([pos_var, neg_var]),
+    )
+
+
 def latent_heatmap(
     embed,
     categorical_column: str,
@@ -396,6 +432,7 @@ def latent_heatmap(
     method: str = "average",
     make_balanced: bool = True,
     remove_vanished: bool = True,
+    directional: bool = True,
     cmap=None,
     figsize: tuple[float, float] | None = None,
     seed: int = 0,
@@ -405,7 +442,7 @@ def latent_heatmap(
     heritability_label: str = "coefficient z",
     alpha: float = 0.05,
     cell_scores: pd.Series | None = None,
-    cell_score_agg: Literal["mean", "median"] = "mean",
+    cell_score_agg: Literal["mean", "median", "sum"] = "mean",
     cell_score_label: str = "score",
 ) -> tuple[Figure, Axes | tuple[Axes, ...]]:
     """Heatmap of latent dimensions (columns) x cells (rows), grouped by `categorical_column`.
@@ -430,22 +467,41 @@ def latent_heatmap(
     on the incidental fact that a balanced subsample happens to come out
     category-blocked.
 
+    `directional=True` (the default -- every factor interpretability plot in this
+    module shows split factors by default, matching :func:`scads_drvi.pl.umap.
+    latent_umap_grid`) splits every kept dimension into two columns instead of one --
+    ``"{title}+"``/``"{title}-"``, a ReLU'd positive part (``np.clip(embed.X, 0,
+    None)``) and a ReLU'd negative part (``np.clip(-embed.X, 0, None)``), zero
+    elsewhere -- the same directional split DRVI's own
+    ``get_effect_of_splits_within_distribution(..., directional=True)`` and this
+    package's own `enrich`/`scores` modules already use (see the tutorial's Section 3
+    and `cs_from_z`). Column identity for `heritability`/`heritability_se`/
+    `heritability_q` becomes ``"{dim}+"``/``"{dim}-"`` accordingly (e.g. an LDSC
+    results table's own ``dim`` + ``direction`` columns, both rows per factor, not
+    just one direction pre-selected). Pass `directional=False` for the older
+    one-column-per-factor view.
+
     Returns `scanpy`'s own ``"heatmap_ax"`` as `ax`; its own category color bar
-    (`"groupby_ax"`) lives on the same `fig` alongside it. Passing `heritability`
-    (a per-dim Series, indexed like `embed.var_names`, reindexed to this heatmap's own
-    column order) adds a bar above the heatmap -- pass `heritability_se` (same index,
-    e.g. an LDSC `.results` table's own ``Coefficient_std_error``, see
+    (`"groupby_ax"`) lives on the same `fig` alongside it -- moved to the figure's top
+    right corner instead, when `cell_scores` is also given, so it does not sit
+    sandwiched between the heatmap and the cell-score bar. Passing `heritability`
+    (a per-dim Series, indexed like `embed.var_names` -- or, when `directional=True`,
+    like the doubled ``"{dim}+"``/``"{dim}-"`` index above -- reindexed to this
+    heatmap's own column order) adds a bar above the heatmap -- pass `heritability_se`
+    (same index, e.g. an LDSC `.results` table's own ``Coefficient_std_error``, see
     :mod:`scads_drvi.enrich.h2_output`) to draw it with error bars, and `heritability_q`
     (same index) to colour it by BH-significance and draw its boundary line, as
     :func:`scads_drvi.pl.enrichment.heritability_landscape` does. Passing `cell_scores`
     (a per-cell Series indexed like `embed.obs_names`) adds a bar to the right showing
-    each `categorical_column` group's `cell_score_agg` of that score, with the group's
-    own standard error of the mean as an error bar -- one bar per group, not per cell,
-    since `scanpy.pl.heatmap` does not expose the exact per-cell row order it draws with
-    (only the per-group block boundaries, which are fully determined by group order and
-    size). Either or both can be omitted; the return value grows to match: `ax` alone by
-    default, `(bar, ax)` with `heritability` only, `(ax, score)` with `cell_scores` only,
-    `(bar, ax, score)` with both.
+    each `categorical_column` group's `cell_score_agg` of that score, with an error bar
+    alongside it -- standard error of the mean for `cell_score_agg="mean"` (default) or
+    `"median"`, or of the sum (``sqrt(n) * std``, the un-normalised total rather than a
+    per-cell average -- "non-normalised cell weights") for `"sum"`. One bar per group,
+    not per cell, since `scanpy.pl.heatmap` does not expose the exact per-cell row order
+    it draws with (only the per-group block boundaries, which are fully determined by
+    group order and size). Either or both can be omitted; the return value grows to
+    match: `ax` alone by default, `(bar, ax)` with `heritability` only, `(ax, score)`
+    with `cell_scores` only, `(bar, ax, score)` with both.
     """
     import scanpy as sc
 
@@ -461,6 +517,9 @@ def latent_heatmap(
         if "vanished" not in embed.var.columns:
             raise KeyError('"vanished" is not a column of embed.var')
         embed = embed[:, ~embed.var["vanished"].to_numpy(dtype=bool)]
+
+    if directional:
+        embed = _directional_split(embed, title_col=title_col, order_col=order_col)
 
     if make_balanced:
         rows = _balanced_rows(embed.obs[categorical_column].astype(str), seed=seed)
@@ -598,9 +657,10 @@ def latent_heatmap(
                 )
 
         if cell_scores is not None:
-            if cell_score_agg not in ("mean", "median"):
+            if cell_score_agg not in ("mean", "median", "sum"):
                 raise ValueError(
-                    f"cell_score_agg must be 'mean' or 'median', got {cell_score_agg!r}"
+                    "cell_score_agg must be 'mean', 'median' or 'sum', got "
+                    f"{cell_score_agg!r}"
                 )
             missing_cells = [c for c in embed.obs_names if c not in cell_scores.index]
             if missing_cells:
@@ -617,14 +677,23 @@ def latent_heatmap(
                 cat_order = sorted(cats.unique())
             counts = cats.value_counts().reindex(cat_order).fillna(0).to_numpy(dtype=int)
             edges = np.concatenate([[0], np.cumsum(counts)])
-            agg = np.mean if cell_score_agg == "mean" else np.median
+            agg = {"mean": np.mean, "median": np.median, "sum": np.sum}[cell_score_agg]
             group_values = [
                 cell_scores.loc[cats.index[cats == cat]].to_numpy(dtype=float) for cat in cat_order
             ]
             values_by_cat = np.array([agg(v) for v in group_values])
-            sem_by_cat = np.array(
-                [v.std(ddof=1) / np.sqrt(len(v)) if len(v) > 1 else 0.0 for v in group_values]
-            )
+            # Standard error of the mean for "mean"/"median" (an average estimate);
+            # of the *sum* -- sqrt(n) * std, not std/sqrt(n) -- for "sum", the
+            # un-normalised total a group's cells contribute rather than a per-cell
+            # average ("non-normalised cell weights").
+            if cell_score_agg == "sum":
+                sem_by_cat = np.array(
+                    [v.std(ddof=1) * np.sqrt(len(v)) if len(v) > 1 else 0.0 for v in group_values]
+                )
+            else:
+                sem_by_cat = np.array(
+                    [v.std(ddof=1) / np.sqrt(len(v)) if len(v) > 1 else 0.0 for v in group_values]
+                )
             mids = (edges[:-1] + edges[1:] - 1) / 2.0
             heights = (edges[1:] - edges[:-1]) * 0.9
 
@@ -652,6 +721,18 @@ def latent_heatmap(
             score.xaxis.set_major_locator(MaxNLocator(nbins=3))
             score.set_xlabel(cell_score_label, fontsize=7)
             score.margins(y=0)
+
+            # scanpy's own colorbar sits in a thin axes it never exposes in `axes`,
+            # by default sandwiched between `heat` and `score` -- move it to the
+            # figure's top right corner instead, so it reads as a legend rather than
+            # a squeezed-in extra column.
+            known = set(axes.values()) | {heat, score}
+            if bar is not None:
+                known.add(bar)
+            colorbar_ax = next((a for a in fig.axes if a not in known), None)
+            if colorbar_ax is not None:
+                cb_w, cb_h = 0.05, 0.12
+                colorbar_ax.set_position([0.99 - cb_w, 0.99 - cb_h, cb_w, cb_h])
 
     if bar is not None and score is not None:
         return fig, (bar, heat, score)
