@@ -46,6 +46,10 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=7.4"]
 drvi = ["scvi-tools>=1.5", "torch>=2.4", "drvi-py>=0.2.7"]
+# scads_drvi.annotate.motif's region-database streaming and overlap mapping. Function-
+# local imports (see the import-surface discipline in test_import_surface.py), so
+# importing the module needs neither; only calling stream_accumulate/build_region_map do.
+annotate = ["pyarrow>=14", "pyranges>=0.0.100,<1"]
 docs = [
     "sphinx>=7.3",
     "sphinx-book-theme>=1.1",

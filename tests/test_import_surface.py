@@ -40,6 +40,8 @@ CORE_MODULES = [
     "scads_drvi.enrich.h2_output",
     "scads_drvi.enrich.annotations",
     "scads_drvi.enrich.binary",
+    "scads_drvi.annotate.gc",
+    "scads_drvi.annotate.motif",
     "scads_drvi._util.advise",
     "scads_drvi._util.progress",
 ]
