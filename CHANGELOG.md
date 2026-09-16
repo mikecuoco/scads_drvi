@@ -5,6 +5,112 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **`pl.factors.latent_heatmap` gains optional heritability/cell-score marginal panels
+  and a directional split, rather than a second `latent_heatmap_with_heritability`
+  (kept, unchanged, for callers without an `embed` `AnnData`).** `heritability`/
+  `heritability_se`/`heritability_q` (per-dim `pd.Series`, reindexed to the heatmap's
+  own column order) draw a bar above the heatmap, with error bars and BH-significance
+  colouring/boundary lines matching `pl.enrichment.heritability_landscape`.
+  `cell_scores`/`cell_score_agg` (`"mean"`/`"median"`/`"sum"`)/`cell_score_label` draw a
+  bar to the right, one per `categorical_column` group (not per cell -- `scanpy.pl.
+  heatmap` never exposes the per-cell row order it actually draws with, only the
+  per-group block boundaries, which are fully determined by group order/size), with an
+  error bar of its own (SEM for `"mean"`/`"median"`, `sqrt(n) * std` for `"sum"`'s
+  un-normalised group total). `directional` (**default `True`**) splits every kept
+  dimension into two columns, `"{dim}+"`/`"{dim}-"`, a ReLU'd positive part and a
+  ReLU'd negative part -- the same split DRVI's own
+  `get_effect_of_splits_within_distribution` and this package's `enrich`/`scores`
+  modules already use, not `latent_umap_grid`'s whole-column negation. Since a ReLU'd
+  split's values are never negative, the heatmap itself also switches colour scale --
+  `cmap` (DRVI's own diverging `SaturatedRdBu`, `vcenter=0`) to `directional_cmap`
+  (default `pl.color.SATURATED_JUST_SKY_CMAP`, a one-sided white-to-saturated ramp
+  from `vmin=0`) -- so it is never spending half its range on values that cannot
+  occur. Passing `cell_scores` also relocates `scanpy`'s own colorbar, previously
+  sandwiched between the heatmap and the new cell-score bar, to the figure's top right
+  corner. The return value grows to match what was requested (`ax`, `(bar, ax)`,
+  `(ax, score)`, or `(bar, ax, score)`).
+- **Breaking: `pl.umap.latent_umap_grid`'s `directional` now defaults to `True`.**
+  Every factor interpretability plot in this package now shows split factors by
+  default; pass `directional=False` for the previous one-panel/one-column-per-
+  dimension view.
+- **`pl.umap.latent_umap_grid`/`pl.factors.latent_dimension_stats`/`latent_heatmap` now
+  match DRVI's own `plot_latent_dims_in_umap`/`plot_latent_dimension_stats`/
+  `plot_latent_dims_in_heatmap` exactly**, not just in spirit: DRVI's own
+  `SaturatedRdBu`/`SaturatedSky` colormaps (copied verbatim into
+  `pl.color.SATURATED_RED_BLUE_CMAP`/`SATURATED_SKY_CMAP`/`SATURATED_JUST_SKY_CMAP`),
+  per-dimension colour limits from `embed.var["min"]`/`["max"]` (in place of this
+  project's own robust percentile limits), the directional +/- split built the same
+  way DRVI builds it (`ad.concat`-ing a negated copy of `embed`, not a temporary `obs`
+  column), DRVI's own panel-title-inside-the-axes trick, and DRVI's own hardcoded
+  black/blue vanished/kept dot colours and `"Rank based on Explanation Share"` x-axis
+  label. `latent_heatmap` now calls `scanpy.pl.heatmap` directly -- the same call
+  DRVI's own `plot_latent_dims_in_heatmap` makes -- rather than a hand-rolled
+  `seaborn.heatmap` draw with its own category shading/colourbar; its figure size
+  default is DRVI's own `(10, n_categories / 6)` (previously scaled by dimension/cell
+  count instead), and its balanced subsample now uses DRVI's own
+  `groupby(...).sample(random_state=0, ...)` mechanism (`seed` default changed
+  `42` -> `0` to match) rather than a separately-seeded draw. `dim_subset` still names
+  raw `embed.var_names`, not DRVI's own title-keyed `dim_subset`; the layout-safe
+  figure legend a past fix already put in `latent_dimension_stats` (avoiding a real
+  `bbox_to_anchor` overlap bug) is kept rather than reverted to DRVI's own positioning.
+- **Breaking: `enrich.embed` is deleted.** `write_result`, `read_feature_loadings`,
+  `attach_enrich_results` and `directional_loadings` were the module's whole surface;
+  each was a thin wrapper a caller can write inline just as easily -- a write is
+  `embed.write_h5ad(path)` after setting `embed.uns["provenance"]`, an enrichment arm is
+  attached with a plain `embed.uns.setdefault("enrich", {})[model] = {...}`, and a
+  directional loadings view is `np.clip(embed.X, 0, None)`/`np.clip(-embed.X, 0, None)`.
+  The companion peaks x K feature-loadings file this module also wrote/read has no
+  replacement; a caller who needs it writes/reads that h5ad directly the same way.
+- **Breaking: a fit's results now live in one `AnnData` (`io.result`), not a directory
+  of TSVs plus a `Project`.** `config.Project`, `io.contract`, `io.meta`, `labels`
+  (`FactorLabels`, `load_labels`, the `dim_j`/`k{i}`/`dim_47/neg` three-name system) and
+  `io.artifacts.Interpretation`/`load_interpretation` are **deleted**. In their place:
+  `io.result.build_embed`/`write_result`/`read_result`/`attach_enrich_results`/
+  `directional_loadings` build, save and load one `obs`=cells, `var`=one-row-per-dim
+  object shaped exactly the way DRVI's own interpretability API expects, with S-LDSC
+  results embedded as a tidy `dim`/`direction`/`trait` table in `uns["enrich"][model]`.
+  There is no persisted pos/neg split — DRVI has none either — a directional loadings
+  view is derived on demand from the canonical signed matrix. `factorize.model.fit_meta`
+  and `.load_fit` now take explicit paths; `enrich.ldsc.read_results` takes an
+  `annot2dim` mapping and a `direction` instead of a `FactorLabels`;
+  `scores.cell.cs_from_z` drops its `labels=` argument, made unnecessary by the above.
+- **`viz` renamed to `pl`.** Two of its functions were deleted in favor of DRVI's own
+  package: `latent_dimension_stats` (`drvi.utils.pl.plot_latent_dimension_stats`) and
+  `group_factor_heatmaps` (`drvi.utils.pl.plot_latent_dims_in_heatmap`);
+  `umap.umap_factor_grid` was likewise replaced by `drvi.utils.pl.plot_latent_dims_in_umap`.
+  Superseded below by in-house replacements — see "Reworked `pl.*` embedding and
+  latent-dimension figures".
+- **Reworked `pl.*` embedding and latent-dimension figures.** `pl.umap.umap_categorical`/
+  `umap_continuous` (plain x/y-frame scatters) are removed, and their would-be
+  replacements `embedding_categorical`/`embedding_continuous` were built, then removed
+  again: a plain categorical or continuous embedding scatter is just
+  `sc.pl.embedding(embed, basis="umap", color=..., vmin="p1", vmax="p99.5")` directly —
+  scanpy already does point sizing, a stable per-category palette, a colorbar, and
+  (via its own percentile-string `vmin`/`vmax`) this project's own robust colour limits,
+  so there is nothing left here worth wrapping. `pl.umap.point_style` and `pl.umap.bare`
+  are removed too (scanpy already handles point sizing and frame stripping);
+  `pl.umap.subsample` is unchanged and still used by `pl.enrichment.covariate_audit`.
+  New: `pl.umap.latent_umap_grid` (the one embedding figure that does earn a wrapper —
+  a directional +/- split and per-panel titles/limits from one `sc.pl.embedding` call),
+  `pl.factors.latent_dimension_stats` and `pl.factors.latent_heatmap` — this project's
+  own in-house replacements for `drvi.utils.pl.plot_latent_dims_in_umap`/
+  `plot_latent_dimension_stats`/`plot_latent_dims_in_heatmap`, restyled to this
+  package's colour policy (`pl.color.percentile_bounds` maps `ROBUST_LIMITS` onto
+  scanpy's own `"pN"` percentile syntax). `latent_heatmap` in particular mirrors DRVI's
+  own signature closely (`embed`, `categorical_column`, `title_col`, `order_col`,
+  `sort_by_categorical`, `make_balanced`, `remove_vanished`) and draws via
+  `seaborn.heatmap` rather than hand-rolled `imshow`/ticks/colorbar; `order="cluster"`
+  is this project's own addition (hierarchical clustering via `pl.factors._cluster_order`,
+  extracted from `factor_correlation` and now shared by both). `drvi-py`'s plotting is
+  no longer needed for any figure this package draws.
+- **`scanpy` is now a hard dependency**, and the project floor is raised to match its own
+  (`requires-python>=3.12`, `numpy>=2`, `pandas>=2.3`, up from `>=3.10`/`>=1.26`/`>=2.1`) —
+  every embedding figure in `pl.*` wraps `scanpy.pl.embedding`, not only the
+  DRVI-specific ones, so it is no longer optional the way `drvi-py`/`scvi-tools`/`torch`
+  are. The `floors` CI job is repinned to `numpy==2.0.0`/`pandas==2.3.0`/`scanpy==1.12.4`
+  accordingly.
+
 ### Added
 - `enrich.annotations` — widens a thin annotation into the full `CHR BP SNP CM + K`
   form `--overlap-annot` requires, and works around the reader's integer type inference.
@@ -14,7 +120,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   coverage: pyflakes, bugbear, isort and pyupgrade.
 - Continuous integration on three dependency stacks mirroring the three environments the
   package is deployed into — no optional dependencies at all, the declared floors
-  (numpy 1.26 / pandas 2.1), and a current stack with h5py and plotting.
+  (Python 3.12 / numpy 2 / pandas 2.3, scanpy's own floor), and a current stack with
+  h5py and plotting.
 
 ### Fixed
 - `io.h5ad.read_obs` indexed the category table with anndata's raw codes, so a **missing**

@@ -1,41 +1,32 @@
-# Tutorials
+# Tutorial
 
-These notebooks walk through the `scads-drvi` pipeline from project setup to publication
-figures. Each tutorial is self-contained and can be run on your own data; the code cells
-show the full API with realistic argument choices.
-
-The tutorials use a **synthetic plant single-cell dataset** (tissues, cultivars, agronomic
-traits) that shares no vocabulary with any real analysis. This is the same dataset that
-drives `tests/test_portability.py`, so you can verify the pipeline end to end without
-providing external data.
-
-## Pipeline overview
+One notebook, run end to end on a real public dataset: a 10x Genomics PBMC scATAC-seq
+sample. It walks the full pipeline in order, with no synthetic stand-ins except where
+the underlying inputs (a GWAS trait's summary statistics, a reference LD panel) are
+themselves an external data-acquisition step rather than something this package
+computes:
 
 ```
-h5ad obs + DRVI fit
+peaks × cells (10x PBMC scATAC)
         │
         ▼
-  01 · Project setup        ── configure paths, YAML, env vars
+  Factorize        ── scvi.external.DRVI directly: fit, save the checkpoint, write the
+                       result h5ad
         │
         ▼
-  02 · Factorize            ── load fit, compute latent repr, plot factor stats
+  Enrich            ── annotate peaks, run S-LDSC, attach results into uns["enrich"],
+                       plot the heritability landscape
         │
         ▼
-  03 · Enrich               ── annotate peaks, run S-LDSC, read results + BH
-        │
-        ▼
-  04 · Cell scores          ── cs_from_z, group summaries, group matrix
-        │
-        ▼
-  05 · Visualise            ── heritability landscape, UMAP grid, grouped heatmap
+  Cell scores       ── cs_from_z, group summaries, group matrix, figures throughout
 ```
+
+Every function above takes an explicit path; a fit's results live in one `AnnData`,
+built and written with plain `anndata` calls at the call site, rather than a directory
+tree a configuration object derives paths into.
 
 ```{toctree}
 :maxdepth: 1
 
-01-project-setup
-02-factorize
-03-enrich
-04-scores
-05-viz
+pbmc
 ```

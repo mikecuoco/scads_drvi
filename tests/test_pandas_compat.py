@@ -1,20 +1,25 @@
 """The package must work on both sides of the pandas 2 -> 3 boundary.
 
-Two of the three environments this runs in are pandas 3.0 and one is 2.1, and the
-differences are not cosmetic: from 3.0 a text column is a ``StringDtype`` extension
-dtype rather than ``object``, copy-on-write is unconditional, and ``applymap`` is gone.
+Two of the three environments this runs in are pandas 3.0 and one is the declared floor
+(now 2.3), and the differences are not cosmetic: from 3.0 a text column is a
+``StringDtype`` extension dtype rather than ``object``, copy-on-write is unconditional,
+and ``applymap`` is gone.
 
 The AST checks below catch the spellings that break silently or only in one environment,
 so a regression is a test failure rather than a crash discovered by whoever next runs
 the notebook.
+
+One regression this module used to guard directly no longer applies: `pl.umap`'s own
+``_coords``/numeric-dtype-detection code (the concrete StringDtype-vs-``np.issubdtype``
+bug this suite exists because of) was deleted when embedding plotting moved onto
+``scanpy.pl.embedding`` -- coordinate/column resolution is scanpy's responsibility now,
+with its own upstream pandas-version handling, not this package's.
 """
 
 from __future__ import annotations
 
 import ast
 
-import pandas as pd
-import pytest
 from conftest import iter_source_files
 
 
@@ -90,51 +95,3 @@ def test_no_object_dtype_comparison():
             if "dtype == object" in stripped or 'dtype == "object"' in stripped:
                 offenders.append(f"{path.name}:{lineno}")
     assert not offenders, "dtype == object is unreliable: " + ", ".join(offenders)
-
-
-@pytest.mark.skipif(
-    not hasattr(pd, "StringDtype"), reason="pandas too old to have StringDtype"
-)
-def test_coordinate_detection_survives_a_string_dtype_column():
-    """The concrete regression: a text column beside two coordinates.
-
-    Constructs the pandas-3 shape explicitly, so this fails under pandas 2.1 too rather
-    than only in the one environment that defaults to it.
-    """
-    matplotlib = pytest.importorskip("matplotlib")
-    matplotlib.use("Agg")
-
-    from scads_drvi.viz.umap import umap_continuous
-
-    frame = pd.DataFrame(
-        {
-            "x": [0.0, 1.0, 2.0],
-            "y": [1.0, 2.0, 3.0],
-            "value": [0.5, 1.5, 2.5],
-            "text": pd.array(["a", "b", "c"], dtype=pd.StringDtype()),
-        }
-    )
-    fig, ax = umap_continuous(frame, "value", n=None)
-    assert ax.get_xlabel() == "x"
-    matplotlib.pyplot.close(fig)
-
-
-@pytest.mark.skipif(
-    not hasattr(pd, "StringDtype"), reason="pandas too old to have StringDtype"
-)
-def test_latent_dimension_stats_survives_a_string_dtype_column():
-    matplotlib = pytest.importorskip("matplotlib")
-    matplotlib.use("Agg")
-
-    from scads_drvi.viz.factors import latent_dimension_stats
-
-    frame = pd.DataFrame(
-        {
-            "dim": pd.array(["dim_0", "dim_1"], dtype=pd.StringDtype()),
-            "vanished": [False, True],
-            "effect": [1.0, 0.0],
-        }
-    )
-    fig, _ = latent_dimension_stats(frame)
-    assert "1 of 2" in fig.get_suptitle()
-    matplotlib.pyplot.close(fig)

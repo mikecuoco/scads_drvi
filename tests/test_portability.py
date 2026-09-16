@@ -7,9 +7,9 @@ seven regions are called something.
 
 So this builds a complete synthetic analysis from scratch -- a plant single-cell
 experiment, with tissues, cultivars and agronomic traits -- and runs it end to end:
-h5ad obs -> Project -> labels -> LDSC results -> BH -> per-cell scores -> aggregation ->
-figures. Nothing here is renamed from the real analysis; the point is that no name
-matches.
+h5ad obs -> the cells x K embed -> written to h5ad -> factor selection -> LDSC results
+-> attached into uns["enrich"] -> BH -> per-cell scores -> aggregation -> figures.
+Nothing here is renamed from the real analysis; the point is that no name matches.
 
 If the package ever grows an assumption about the real dataset, this fails.
 """
@@ -20,18 +20,30 @@ import numpy as np
 import pandas as pd
 import pytest
 
-h5py = pytest.importorskip("h5py")
+ad = pytest.importorskip("anndata")
+sc = pytest.importorskip("scanpy")
 matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 
-from scads_drvi.config import Project  # noqa: E402
-from scads_drvi.io.artifacts import (  # noqa: E402
-    cell_metadata,
-    load_interpretation,
-    read_loadings,
+from scads_drvi.enrich.config import (  # noqa: E402
+    kept_dims,
+    latent_stats_from_embed,
+    select_factors,
 )
+from scads_drvi.enrich.ldsc import read_results  # noqa: E402
+from scads_drvi.pl.enrichment import (  # noqa: E402
+    covariate_audit,
+    grouped_landscape,
+    heritability_landscape,
+    score_by_group,
+    trait_concordance,
+)
+from scads_drvi.pl.factors import latent_dimension_stats, latent_heatmap  # noqa: E402
+from scads_drvi.pl.frugal import box_stats  # noqa: E402
+from scads_drvi.pl.save import save_figure  # noqa: E402
+from scads_drvi.pl.umap import latent_umap_grid  # noqa: E402
 from scads_drvi.scores.aggregate import (  # noqa: E402
     block_order,
     eta_squared,
@@ -40,16 +52,6 @@ from scads_drvi.scores.aggregate import (  # noqa: E402
 )
 from scads_drvi.scores.cell import ScoreKind, cs_from_z  # noqa: E402
 from scads_drvi.stats import significant  # noqa: E402
-from scads_drvi.viz.enrichment import (  # noqa: E402
-    covariate_audit,
-    grouped_landscape,
-    heritability_landscape,
-    score_by_group,
-    trait_concordance,
-)
-from scads_drvi.viz.frugal import box_stats  # noqa: E402
-from scads_drvi.viz.save import save_figure  # noqa: E402
-from scads_drvi.viz.umap import umap_categorical, umap_continuous  # noqa: E402
 
 # A vocabulary with no overlap with the real analysis.
 TISSUES = ("leaf", "root", "stem", "flower")
@@ -64,110 +66,139 @@ TRAITS = ("plant_height", "grain_yield")
 N_CELLS = 3000
 N_FACTORS = 12
 N_KEPT = 9
+ARM = "assembly_v3_topfrac"
+
+
+class _FakeModel:
+    """Stands in for a trained ``scvi.external.DRVI``: only the two methods the
+    cells x K embed construction needs -- ``get_latent_representation`` and DRVI's own
+    ``set_latent_dimension_stats``, driven by a fixed signed latent matrix and a fixed
+    kept/vanished split, so the rest of this test can exercise the real pipeline
+    functions against it."""
+
+    def __init__(self, z, vanished):
+        self._z = z
+        self._vanished = np.asarray(vanished, dtype=bool)
+
+    def get_latent_representation(self, adata=None, indices=None, batch_size=128):
+        out = self._z
+        if indices is not None:
+            out = out[np.asarray(indices)]
+        return out
+
+    def set_latent_dimension_stats(
+        self, embed, adata=None, datamodule=None, vanished_threshold=0.5
+    ):
+        embed.var["vanished"] = self._vanished
+        embed.var["order"] = np.arange(embed.n_vars)
+        embed.var["title"] = [f"DR {i + 1}" for i in range(embed.n_vars)]
+        # The stat columns real DRVI writes too -- trivially derived from the fixed
+        # latent matrix, exactly enough for latent_dimension_stats/latent_umap_grid to
+        # exercise for real rather than being skipped by this synthetic fixture.
+        embed.var["reconstruction_effect"] = np.abs(self._z).mean(axis=0)
+        embed.var["max_value"] = np.abs(self._z).max(axis=0)
+        embed.var["mean"] = self._z.mean(axis=0)
+        embed.var["std"] = self._z.std(axis=0)
+        embed.var["min"] = self._z.min(axis=0)
+        embed.var["max"] = self._z.max(axis=0)
 
 
 @pytest.fixture(scope="module")
 def analysis(tmp_path_factory):
-    """A complete synthetic run on disk, in the layout Project expects."""
+    """A complete synthetic run on disk, in the shape the real pipeline produces."""
     root = tmp_path_factory.mktemp("plant_atac")
     rng = np.random.default_rng(0)
 
     fine = [t for lineage in LINEAGES for t in FINE_TYPES[lineage]]
     lineage_of = {t: lin for lin in LINEAGES for t in FINE_TYPES[lin]}
 
-    cell_ids = np.array(
-        [f"plate{i % 5}:bc{i:05d}".encode() for i in range(N_CELLS)]
-    )
-    fine_codes = rng.integers(0, len(fine), size=N_CELLS).astype(np.int32)
-    tissue_codes = rng.integers(0, len(TISSUES), size=N_CELLS).astype(np.int32)
-    cultivar_codes = rng.integers(0, len(CULTIVARS), size=N_CELLS).astype(np.int32)
+    cell_ids = [f"plate{i % 5}:bc{i:05d}" for i in range(N_CELLS)]
+    fine_vals = rng.choice(fine, size=N_CELLS)
+    tissue_vals = rng.choice(TISSUES, size=N_CELLS)
+    cultivar_vals = rng.choice(CULTIVARS, size=N_CELLS)
     reads = rng.integers(500, 200_000, size=N_CELLS).astype(np.int64)
     in_peaks = (reads * rng.uniform(0.2, 0.8, size=N_CELLS)).astype(np.int64)
     in_peaks[0] = 0
-    reads[0] = 0  # a cell with nothing measured, so the ratio must be NaN
+    reads[0] = 0  # a cell with nothing measured, so the derived ratio must be NaN
 
-    obs_path = root / "matrix.h5ad"
-    with h5py.File(obs_path, "w") as fh:
-        obs = fh.create_group("obs")
-        obs.attrs["_index"] = "cell_uid"
-        obs.attrs["encoding-type"] = "dataframe"
-        obs.create_dataset("cell_uid", data=cell_ids)
-        for name, codes, cats in (
-            ("fine_type", fine_codes, fine),
-            ("tissue", tissue_codes, TISSUES),
-            ("cultivar", cultivar_codes, CULTIVARS),
-        ):
-            group = obs.create_group(name)
-            group.create_dataset(
-                "categories", data=np.array([c.encode() for c in cats])
-            )
-            group.create_dataset("codes", data=codes)
-        obs.create_dataset("total_reads", data=reads)
-        obs.create_dataset("reads_in_peaks", data=in_peaks)
-        # lineage, so there is a coarse grouping to block a fine axis by
-        lineage_codes = np.array(
-            [LINEAGES.index(lineage_of[fine[c]]) for c in fine_codes], dtype=np.int32
-        )
-        group = obs.create_group("lineage")
-        group.create_dataset(
-            "categories", data=np.array([lin.encode() for lin in LINEAGES])
-        )
-        group.create_dataset("codes", data=lineage_codes)
-
-    project = Project(
-        root=root, fit="assembly_v3", traits=TRAITS
-    )
-    fit_dir = project.fit_dir()
-    fit_dir.mkdir(parents=True)
-
-    dims = [f"dim_{j}" for j in range(N_FACTORS)]
-    loadings = np.clip(rng.normal(0.4, 0.5, size=(N_CELLS, N_FACTORS)), 0, None)
-    np.savez(
-        fit_dir / "topic_loadings.npz",
-        cells=np.array([c.decode() for c in cell_ids], dtype=object),
-        factors=np.array(dims),
-        loadings=loadings.astype(np.float32),
-    )
-
-    arm = "assembly_v3_topfrac"
-    arm_dir = project.enrich_dir(arm)
-    (arm_dir / "results").mkdir(parents=True)
-    kept = [True] * N_KEPT + [False] * (N_FACTORS - N_KEPT)
-    pd.DataFrame(
+    # A real customer's obs h5ad, written the way anndata itself writes one -- no
+    # hand-rolled h5py encoding, since there is no custom decoder left to stress-test.
+    obs_df = pd.DataFrame(
         {
-            "dim": dims,
-            "vanished": [False] * N_FACTORS,
-            "kept": kept,
-            "drop_reason": ["" if k else "annot_too_small" for k in kept],
-            "annot_index": [i + 1 if k else None for i, k in enumerate(kept)],
-        }
-    ).to_csv(arm_dir / "factor_map.tsv", sep="\t", index=False)
+            "fine_type": pd.Categorical(fine_vals),
+            "tissue": pd.Categorical(tissue_vals),
+            "cultivar": pd.Categorical(cultivar_vals),
+            "lineage": pd.Categorical(
+                [lineage_of[f] for f in fine_vals], categories=LINEAGES
+            ),
+            "total_reads": reads,
+            "reads_in_peaks": in_peaks,
+        },
+        index=pd.Index(cell_ids, name="cell_uid"),
+    )
+    obs_path = root / "matrix.h5ad"
+    ad.AnnData(X=np.zeros((N_CELLS, 1), dtype=np.float32), obs=obs_df).write_h5ad(obs_path)
 
+    # -- obs h5ad + a trained model -> the canonical cells x K object -----------------
+    raw = ad.read_h5ad(obs_path)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        raw.obs["peak_fraction"] = np.where(
+            raw.obs["total_reads"].to_numpy() > 0,
+            raw.obs["reads_in_peaks"].to_numpy() / raw.obs["total_reads"].to_numpy(),
+            np.nan,
+        )
+    z = rng.normal(0.2, 0.6, size=(N_CELLS, N_FACTORS)).astype(np.float32)
+    vanished = np.array([False] * N_KEPT + [True] * (N_FACTORS - N_KEPT))
+    model = _FakeModel(z, vanished)
+
+    obs_columns = [
+        "fine_type", "tissue", "cultivar", "lineage", "total_reads", "peak_fraction",
+    ]
+    embed = ad.AnnData(
+        X=model.get_latent_representation(raw), obs=raw.obs[obs_columns].copy()
+    )
+    embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+    model.set_latent_dimension_stats(embed)
+    # A UMAP is set directly from the embed once computed -- no read/reindex step.
+    embed.obsm["X_umap"] = rng.normal(size=(N_CELLS, 2)).astype(np.float32)
+
+    path = root / "assembly_v3.h5ad"
+    embed.uns["provenance"] = {"n_latent": N_FACTORS, "fit_name": "assembly_v3"}
+    embed.write_h5ad(path)
+
+    # -- factor selection, exactly the way the real enrichment stage would ------------
+    embed = ad.read_h5ad(path)
+    stats = latent_stats_from_embed(embed)
+    fmap = select_factors(stats, list(embed.var_names))
+    keep = kept_dims(fmap)
+    assert len(keep) == N_KEPT
+    annot2dim = {f"k{i + 1}": dim for i, dim in enumerate(keep)}
+
+    results_root = root / "results"
     for trait_index, trait in enumerate(TRAITS):
-        trait_dir = arm_dir / "results" / trait
+        trait_dir = results_root / trait
         trait_dir.mkdir(parents=True)
-        for slot in range(N_KEPT):
-            z = 4.5 - 0.6 * slot + 0.3 * trait_index
+        for slot, annot in enumerate(annot2dim):
+            z_score = 4.5 - 0.6 * slot + 0.3 * trait_index
             pd.DataFrame(
                 {
-                    "Category": [f"k{slot + 1}L2_0"],
-                    "Coefficient": [1e-8 * z],
+                    "Category": [f"{annot}L2_0"],
+                    "Coefficient": [1e-8 * z_score],
                     "Coefficient_std_error": [1e-8],
-                    "Coefficient_z-score": [z],
+                    "Coefficient_z-score": [z_score],
                     "n_categories": [40],
                     "total_h2": [0.11],
                 }
-            ).to_csv(trait_dir / f"k{slot + 1}.results", sep="\t", index=False)
+            ).to_csv(trait_dir / f"{annot}.results", sep="\t", index=False)
 
-    coords = pd.DataFrame(
-        rng.normal(size=(N_CELLS, 2)),
-        index=[c.decode() for c in cell_ids],
-        columns=["embed_1", "embed_2"],
-    )
-    coords.index.name = "cell_uid"
-    coords.to_csv(root / "embedding.tsv", sep="\t")
+    results = read_results(results_root, traits=TRAITS, annot2dim=annot2dim)
+    embed.uns.setdefault("enrich", {})[ARM] = {
+        "results": results,
+        "factor_selection": fmap.drop(columns="annot_index"),
+    }
+    embed.write_h5ad(path)
 
-    return {"project": project, "arm": arm, "obs": obs_path, "coords": root / "embedding.tsv"}
+    return {"path": path, "obs": obs_path, "keep": keep}
 
 
 @pytest.fixture(autouse=True)
@@ -177,59 +208,48 @@ def close_figures():
 
 
 def test_obs_decodes_with_an_unfamiliar_index_and_columns(analysis):
-    frame = cell_metadata(
-        analysis["obs"],
-        columns=["fine_type", "tissue", "cultivar", "lineage", "total_reads"],
-        derived={"peak_fraction": ("reads_in_peaks", "total_reads")},
-    )
+    frame = ad.read_h5ad(analysis["obs"]).obs
     assert frame.index.name == "cell_uid"
     assert len(frame) == N_CELLS
     assert set(frame["tissue"].astype(str)) == set(TISSUES)
     # the unmeasured cell has no fraction, not a zero one
-    assert np.isnan(frame["peak_fraction"].iloc[0])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        fraction = np.where(
+            frame["total_reads"].to_numpy() > 0,
+            frame["reads_in_peaks"].to_numpy() / frame["total_reads"].to_numpy(),
+            np.nan,
+        )
+    assert np.isnan(fraction[0])
 
 
-def test_full_interpretation_loads(analysis):
-    interp = load_interpretation(
-        analysis["project"],
-        analysis["arm"],
-        obs_path=analysis["obs"],
-        obs_columns=["fine_type", "tissue", "cultivar", "lineage", "total_reads"],
-        derived={"peak_fraction": ("reads_in_peaks", "total_reads")},
-        umap_path=analysis["coords"],
-    )
-    assert interp.labels.n_kept == N_KEPT
-    assert interp.traits == TRAITS
-    assert len(interp.results) == N_KEPT * len(TRAITS)
-    assert {"embed_1", "embed_2", "fine_type"} <= set(interp.cells.columns)
-    assert interp.n_cells == N_CELLS
+def test_full_result_loads(analysis):
+    embed = ad.read_h5ad(analysis["path"])
+    arm = embed.uns["enrich"][ARM]
+    assert int(arm["factor_selection"]["kept"].sum()) == N_KEPT
+    assert set(arm["results"]["trait"]) == set(TRAITS)
+    assert len(arm["results"]) == N_KEPT * len(TRAITS)
+    assert embed.obsm["X_umap"].shape == (N_CELLS, 2)
+    assert "fine_type" in embed.obs.columns
+    assert embed.n_obs == N_CELLS
 
 
 def test_scores_and_aggregation_over_alien_groupings(analysis):
-    project, arm = analysis["project"], analysis["arm"]
-    interp = load_interpretation(
-        project,
-        arm,
-        obs_path=analysis["obs"],
-        obs_columns=["fine_type", "tissue", "cultivar", "lineage"],
-        umap_path=analysis["coords"],
-    )
-    primary = interp.for_trait("plant_height")
+    embed = ad.read_h5ad(analysis["path"])
+    arm = embed.uns["enrich"][ARM]
+    keep = analysis["keep"]
+
+    primary = arm["results"].loc[arm["results"]["trait"] == "plant_height"]
     assert int(significant(primary).sum()) >= 1
 
-    loadings = read_loadings(
-        project.contract(arm)["loadings"],
-        npz=project.contract(arm)["loadings_npz"],
-        dims=list(interp.labels.kept_dims),
-    )
-    scores = cs_from_z(
-        loadings, primary, model=arm, trait="plant_height", labels=interp.labels
-    )
+    loadings = pd.DataFrame(
+        np.clip(embed.X, 0, None), index=embed.obs_names, columns=embed.var_names
+    )[keep]
+    scores = cs_from_z(loadings, primary, model=ARM, trait="plant_height")
     assert scores.kind is ScoreKind.Z_WEIGHTED
     assert scores.null == 0.0
     assert (scores.values >= 0).all()
 
-    cells = interp.cells
+    cells = embed.obs
     summary = summarize_by(scores.values, cells, by=["fine_type"], min_cells=10)
     assert len(summary) == len(
         [t for lineage in LINEAGES for t in FINE_TYPES[lineage]]
@@ -259,34 +279,27 @@ def test_scores_and_aggregation_over_alien_groupings(analysis):
 
 
 def test_every_figure_draws_and_saves(analysis, tmp_path):
-    project, arm = analysis["project"], analysis["arm"]
-    interp = load_interpretation(
-        project,
-        arm,
-        obs_path=analysis["obs"],
-        obs_columns=["fine_type", "tissue", "cultivar", "lineage", "total_reads"],
-        derived={"peak_fraction": ("reads_in_peaks", "total_reads")},
-        umap_path=analysis["coords"],
-    )
-    primary = interp.for_trait("plant_height")
-    loadings = read_loadings(
-        project.contract(arm)["loadings"],
-        npz=project.contract(arm)["loadings_npz"],
-        dims=list(interp.labels.kept_dims),
-    )
-    scores = cs_from_z(loadings, primary, model=arm, trait="plant_height")
-    cells = interp.cells.copy()
+    embed = ad.read_h5ad(analysis["path"])
+    arm = embed.uns["enrich"][ARM]
+    keep = analysis["keep"]
+
+    primary = arm["results"].loc[arm["results"]["trait"] == "plant_height"]
+    loadings = pd.DataFrame(
+        np.clip(embed.X, 0, None), index=embed.obs_names, columns=embed.var_names
+    )[keep]
+    scores = cs_from_z(loadings, primary, model=ARM, trait="plant_height")
+
+    cells = embed.obs.copy()
     cells["score"] = scores.values.reindex(cells.index)
+    embed.obs["score"] = cells["score"]
 
     outdir = tmp_path / "figures"
     written: list = []
 
-    fig, _ = heritability_landscape(
-        interp.results, trait="plant_height", labels=interp.labels
-    )
+    fig, _ = heritability_landscape(arm["results"], trait="plant_height")
     written += save_figure(fig, "01_landscape", outdir)
 
-    fig, _ = trait_concordance(interp.results, traits=list(TRAITS), labels=interp.labels)
+    fig, _ = trait_concordance(arm["results"], traits=list(TRAITS))
     written += save_figure(fig, "02_concordance", outdir)
 
     fig, _ = covariate_audit(
@@ -295,9 +308,14 @@ def test_every_figure_draws_and_saves(analysis, tmp_path):
     )
     written += save_figure(fig, "03_covariates", outdir)
 
-    fig, _ = umap_categorical(cells, "fine_type", n=500)
+    # A plain categorical/continuous embedding scatter is just a scanpy call now --
+    # scads_drvi.pl.umap only wraps the per-dimension grid (below), not this.
+    fig = sc.pl.embedding(embed, basis="umap", color="fine_type", show=False, return_fig=True)
     written += save_figure(fig, "04a_groups", outdir)
-    fig, _ = umap_continuous(cells, "score", n=500, colorbar_label=scores.label)
+    fig = sc.pl.embedding(
+        embed, basis="umap", color="score", vmin="p1", vmax="p99.5",
+        show=False, return_fig=True,
+    )
     written += save_figure(fig, "04b_score", outdir)
 
     stats = box_stats(cells["score"], cells["fine_type"].astype(str), min_n=10)
@@ -317,14 +335,23 @@ def test_every_figure_draws_and_saves(analysis, tmp_path):
     )
     written += save_figure(fig, "06_landscape", outdir)
 
-    assert len(written) == 14  # seven figures, pdf + png each
+    fig = latent_umap_grid(embed, n=500)
+    written += save_figure(fig, "07_latent_umap_grid", outdir)
+
+    fig, _ = latent_dimension_stats(embed.var)
+    written += save_figure(fig, "08_latent_dimension_stats", outdir)
+
+    fig, _ = latent_heatmap(embed, "fine_type")
+    written += save_figure(fig, "09_latent_heatmap", outdir)
+
+    assert len(written) == 20  # ten figures, pdf + png each
     assert all(p.exists() and p.stat().st_size > 0 for p in written)
 
 
 def test_highlight_names_a_category_from_this_dataset(analysis):
     """The highlighted category is the caller's claim, so an alien name must work and
     an unknown one must be refused."""
-    from scads_drvi.viz.color import categorical_palette
+    from scads_drvi.pl.color import categorical_palette
 
     palette = categorical_palette(list(FINE_TYPES["vasculature"]), highlight="vasc_2")
     assert palette["vasc_2"] == "#D55E00"

@@ -7,7 +7,7 @@ name = "scads-drvi"
 version = "0.1.0"
 description = "DRVI factorization, S-LDSC heritability enrichment and per-cell disease scores for single-cell ATAC data"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 authors = [{ name = "Mike Cuoco", email = "mike.cuoco@alleninstitute.org" }]
 classifiers = [
     "Intended Audience :: Science/Research",
@@ -18,21 +18,34 @@ classifiers = [
 
 # Floors DOCUMENT what the code needs; they are not an install instruction. Inside a
 # mamba-solved prefix install with --no-deps so pip never re-resolves numpy/pandas.
+#
+# numpy/pandas/python/scipy/matplotlib were raised to match scanpy's own floor
+# (Requires-Python>=3.12, numpy>=2, pandas>=2.3, matplotlib>=3.10, as of scanpy
+# 1.12.4 -- scipy>=1.13 is the first scipy release compatible with numpy 2, one
+# transitive step further than scanpy's own declared floor) rather than pinning an
+# older scanpy or keeping it optional: pl/ now wraps scanpy.pl.embedding directly for
+# every embedding figure, not only the DRVI-specific ones, so scanpy is a hard
+# dependency of the plotting stage the same way matplotlib/seaborn already are.
 dependencies = [
-    "numpy>=1.26",
-    "pandas>=2.1",
-    "scipy>=1.11",
+    "numpy>=2",
+    "pandas>=2.3",
+    "scipy>=1.13",
     "pyyaml>=6.0",
     "h5py>=3.10",
     "anndata>=0.10",
-    "matplotlib>=3.8",
+    "matplotlib>=3.10",
     "seaborn>=0.13",
-    "scvi-tools>=1.5",
-    "torch>=2.4",
+    "scanpy>=1.12",
 ]
 
+# torch/scvi-tools/drvi-py are not imported anywhere in this package (training and
+# loading a DRVI model is the caller's own job, done directly against
+# `scvi.external.DRVI` -- see the getting-started guide). They are an optional extra,
+# not a hard dependency, so `pip install scads-drvi` stays light for callers who only
+# need the enrichment/scoring/plotting stages.
 [project.optional-dependencies]
 test = ["pytest>=7.4"]
+drvi = ["scvi-tools>=1.5", "torch>=2.4", "drvi-py>=0.2.7"]
 docs = [
     "sphinx>=7.3",
     "sphinx-book-theme>=1.1",
@@ -75,7 +88,7 @@ markers = [
 # one real closure bug and one zip that silently truncated a padded subplot grid.
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
