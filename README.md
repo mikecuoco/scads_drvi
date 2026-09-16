@@ -35,6 +35,8 @@ explicit path, a bare read is just `anndata.read_h5ad(path)`, a write is
 | `enrich.config` | enrichment config loading and factor selection |
 | `enrich.ldsc` | read `.results` files into one tidy `dim`/`direction`/`trait` table |
 | `scores.cell` / `.aggregate` | the two `CS_i` formulas; group summaries and matrices |
+| `annotate.motif` / `.gc` | weighted factor-motif enrichment against a region x motif score database, calibrated by an exact (never sampled) permutation null |
+| `annotate.resources` | resolves aertslab's public SCREEN cisTarget score database (cache/verify/opt-in download, ~14 GB) |
 | `pl.*` | style, colour policy, frugal boxes, and every figure -- including its own in-house per-dimension UMAP grid, stats plot and category heatmap |
 
 Where DRVI's own package (`drvi-py`) already computes something -- per-dimension
@@ -149,6 +151,7 @@ lazily. Heavy dependencies are confined by directory:
 | module | needs |
 |---|---|
 | `pl/` | `matplotlib`, `seaborn`, `scanpy` (→ `anndata`), function-local |
+| `annotate/` | `pyarrow`/`bioframe`, both hard dependencies now (`bioframe`'s own declared deps are already required here except `requests`) but still function-local -- importing the module needs neither, only `stream_accumulate`/`build_region_map` do |
 | everything else | numpy / pandas / scipy / pyyaml |
 
 This is not cosmetic. The environment that runs the enrichment stages has no torch, no
