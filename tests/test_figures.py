@@ -405,16 +405,17 @@ class TestLatentHeatmap:
         assert len(ax_kept.get_xticklabels()) < len(ax_all.get_xticklabels())
 
     def test_make_balanced_gives_every_category_the_same_row_count(self, heatmap_embed):
+        # scanpy's own sc.pl.heatmap draws with imshow (ax.images), not pcolormesh.
         _, ax = latent_heatmap(heatmap_embed, "grouping", make_balanced=True, seed=1)
         counts = heatmap_embed.obs["grouping"].value_counts()
         expected_n = max(10, int(counts.min()))
-        assert ax.collections[0].get_array().shape[0] == expected_n * counts.size
+        assert ax.images[0].get_array().shape[0] == expected_n * counts.size
 
     def test_make_balanced_is_reproducible(self, heatmap_embed):
         _, ax1 = latent_heatmap(heatmap_embed, "grouping", make_balanced=True, seed=1)
         _, ax2 = latent_heatmap(heatmap_embed, "grouping", make_balanced=True, seed=1)
         np.testing.assert_array_equal(
-            ax1.collections[0].get_array(), ax2.collections[0].get_array()
+            ax1.images[0].get_array(), ax2.images[0].get_array()
         )
 
     def test_column_labels_match_titles_in_rank_order(self, heatmap_embed):

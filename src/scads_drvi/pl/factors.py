@@ -402,15 +402,16 @@ def latent_heatmap(
 ) -> tuple[Figure, Axes]:
     """Heatmap of latent dimensions (columns) x cells (rows), grouped by `categorical_column`.
 
-    Ported to match ``drvi.utils.pl.plot_latent_dims_in_heatmap``'s own mechanics --
-    same `embed` input, parameter names and defaults (`title_col`, `order_col`,
-    `sort_by_categorical`, `make_balanced`, `remove_vanished`), DRVI's own
-    ``SaturatedRdBu`` colour scale (`cmap`, default
-    :data:`scads_drvi.pl.color.SATURATED_RED_BLUE_CMAP`) centred at 0 and no
-    dendrogram, so it is a comfortable swap-in. `seed` now defaults to 0, matching
-    DRVI's own hardcoded ``make_balanced_subsample`` seed (see :func:`_balanced_rows`),
-    so the balanced subsample actually drawn is the same one DRVI's own call draws.
-    Drawn with :func:`seaborn.heatmap` rather than hand-rolled ``imshow``/ticks/colorbar.
+    Ported to call ``scanpy.pl.heatmap`` directly, the same way DRVI's own
+    ``drvi.utils.pl.plot_latent_dims_in_heatmap`` does -- same `embed` input, parameter
+    names and defaults (`title_col`, `order_col`, `sort_by_categorical`,
+    `make_balanced`, `remove_vanished`), DRVI's own ``SaturatedRdBu`` colour scale
+    (`cmap`, default :data:`scads_drvi.pl.color.SATURATED_RED_BLUE_CMAP`) centred at 0
+    and no dendrogram, so it is a comfortable swap-in -- not a hand-rolled
+    ``seaborn.heatmap`` draw with its own category shading/colourbar. `seed` defaults
+    to 0, matching DRVI's own hardcoded ``make_balanced_subsample`` seed (see
+    :func:`_balanced_rows`), so the balanced subsample actually drawn is the same one
+    DRVI's own call draws.
 
     `sort_by_categorical=True` reproduces DRVI's own heuristic exactly (each dimension
     ordered by which cell holds its largest-magnitude value). `order="cluster"`
@@ -421,15 +422,12 @@ def latent_heatmap(
     on the incidental fact that a balanced subsample happens to come out
     category-blocked.
 
-    `make_balanced` reproduces DRVI's own ``make_balanced_subsample`` (see
-    :func:`_balanced_rows`): every category contributes the same number of cells, so no
-    single large category dominates the figure.
+    Returns `scanpy`'s own ``"heatmap_ax"`` as `ax`; its own category color bar
+    (`"groupby_ax"`) lives on the same `fig` alongside it.
     """
-    import matplotlib.pyplot as plt
-    import pandas as pd
-    import seaborn as sns
+    import scanpy as sc
 
-    from scads_drvi.pl.color import SATURATED_RED_BLUE_CMAP, robust_limits
+    from scads_drvi.pl.color import SATURATED_RED_BLUE_CMAP
 
     cmap = SATURATED_RED_BLUE_CMAP if cmap is None else cmap
 
@@ -442,11 +440,9 @@ def latent_heatmap(
             raise KeyError('"vanished" is not a column of embed.var')
         embed = embed[:, ~embed.var["vanished"].to_numpy(dtype=bool)]
 
-    categories = embed.obs[categorical_column].astype(str)
     if make_balanced:
-        rows = _balanced_rows(categories, seed=seed)
+        rows = _balanced_rows(embed.obs[categorical_column].astype(str), seed=seed)
         embed = embed[rows]
-        categories = categories.loc[embed.obs_names]
 
     x = np.asarray(embed.X.toarray() if hasattr(embed.X, "toarray") else embed.X, dtype=float)
 
@@ -459,56 +455,20 @@ def latent_heatmap(
     else:
         dim_order = np.arange(x.shape[1])
 
-    dim_names = np.asarray(embed.var_names)[dim_order]
-    titles = (
-        embed.var[title_col].astype(str).to_numpy()[dim_order]
-        if title_col is not None else dim_names
+    ordered_var = embed.var.iloc[dim_order]
+    vars_to_show = list(
+        ordered_var.index if title_col is None else ordered_var[title_col].astype(str)
     )
-
-    row_order = np.argsort(categories.to_numpy(), kind="stable")
-    image = x[np.ix_(row_order, dim_order)]
-    ordered_categories = categories.to_numpy()[row_order]
 
     if figsize is None:
-        figsize = (
-            max(4.0, 0.15 * len(dim_order)) + 1.5,
-            max(3.0, min(0.02 * len(row_order), 14.0)),
-        )
-    # constrained_layout is what makes the category labels below (placed in axes-
-    # fraction space, past the right edge of the plotted heatmap) and the colorbar
-    # coexist without the layout engine's default margins clipping one or overlapping
-    # them -- explicit here rather than assumed from a caller's `apply_style()`.
-    fig, ax = plt.subplots(figsize=figsize, layout="constrained")
+        figsize = (10, len(embed.obs[categorical_column].unique()) / 6)
 
-    vmin, vmax = robust_limits(image, symmetric=True)
-    # cbar=False, then a slim manual colorbar (`fraction=0.03`, matching
-    # factor_correlation/grouped_landscape's own convention elsewhere in this module) --
-    # seaborn's own default colorbar reserves much more width, competing with the
-    # category-label margin below for the same space.
-    sns.heatmap(
-        image, ax=ax, cmap=cmap, vmin=vmin, vmax=vmax, center=0,
-        xticklabels=titles, yticklabels=False, cbar=False,
+    axes = sc.pl.heatmap(
+        embed, vars_to_show, categorical_column, gene_symbols=title_col,
+        figsize=figsize, show_gene_labels=True, show=False,
+        vcenter=0, cmap=cmap, dendrogram=False,
     )
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=90, fontsize=6)
-    ax.set_ylabel(f"cells (grouped by {categorical_column})")
-    fig.colorbar(ax.collections[0], ax=ax, pad=0.02, fraction=0.03).set_label("value")
-
-    n_rows = len(row_order)
-    start = 0
-    for slot, name in enumerate(pd.unique(ordered_categories)):
-        stop = start + int((ordered_categories == name).sum())
-        if slot % 2 == 0:
-            ax.axhspan(start, stop, color="#F2F2F2", zorder=0)
-        # axes-fraction, not data coordinates -- independent of wherever the colorbar
-        # ends up. seaborn's heatmap inverts the y-axis (row 0 at the top), so axes
-        # fraction 1 is row 0 and fraction 0 is row `n_rows`.
-        ax.text(
-            1.02, 1.0 - (start + stop) / 2.0 / n_rows, str(name),
-            va="center", ha="left", fontsize=7, transform=ax.transAxes,
-        )
-        start = stop
-
-    return fig, ax
+    return axes["heatmap_ax"].figure, axes["heatmap_ax"]
 
 
 def latent_heatmap_with_heritability(

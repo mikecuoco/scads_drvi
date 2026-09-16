@@ -16,7 +16,11 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   way DRVI builds it (`ad.concat`-ing a negated copy of `embed`, not a temporary `obs`
   column), DRVI's own panel-title-inside-the-axes trick, and DRVI's own hardcoded
   black/blue vanished/kept dot colours and `"Rank based on Explanation Share"` x-axis
-  label. `latent_heatmap`'s balanced subsample now uses DRVI's own
+  label. `latent_heatmap` now calls `scanpy.pl.heatmap` directly -- the same call
+  DRVI's own `plot_latent_dims_in_heatmap` makes -- rather than a hand-rolled
+  `seaborn.heatmap` draw with its own category shading/colourbar; its figure size
+  default is DRVI's own `(10, n_categories / 6)` (previously scaled by dimension/cell
+  count instead), and its balanced subsample now uses DRVI's own
   `groupby(...).sample(random_state=0, ...)` mechanism (`seed` default changed
   `42` -> `0` to match) rather than a separately-seeded draw. `dim_subset` still names
   raw `embed.var_names`, not DRVI's own title-keyed `dim_subset`; the layout-safe
