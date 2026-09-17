@@ -55,6 +55,12 @@ def select_factors(
 ) -> pd.DataFrame:
     """Build the factor map: which dimensions get enriched, and under which k index.
 
+    `latent_stats` is indexed by dimension name and needs only a `vanished` column
+    (plus, optionally, `vanished_positive_direction`) -- typically `embed.var` itself,
+    since DRVI's own ``model.set_latent_dimension_stats`` already wrote those columns
+    onto it (see the getting-started guide's training example). No reshaping is
+    needed to call this.
+
     ``dim_names`` is authoritative for ordering and membership -- it comes from
     topic_loadings.tsv, i.e. the contract, not from the inspect artifact.
 
@@ -68,21 +74,23 @@ def select_factors(
     downstream may renumber on its own.
     """
     dim_names = list(dim_names)
-    stats_dims = list(latent_stats["dim"].astype(str))
+    stats = latent_stats.set_axis(latent_stats.index.astype(str), axis=0)
+    stats_dims = list(stats.index)
     if set(stats_dims) != set(dim_names):
         only_stats = sorted(set(stats_dims) - set(dim_names))
         only_contract = sorted(set(dim_names) - set(stats_dims))
         raise ValueError(
-            "latent_stats.tsv does not describe the same dimensions as the "
+            "latent_stats does not describe the same dimensions as the "
             f"loadings. Only in latent_stats: {only_stats}; only in loadings: "
             f"{only_contract}. These must come from the same fit."
         )
 
-    stats = latent_stats.set_index(latent_stats["dim"].astype(str))
     exclude_dims = set(exclude_dims or ())
     unknown = exclude_dims - set(dim_names)
     if unknown:
         raise ValueError(f"factors.exclude_dims names unknown dimensions: {sorted(unknown)}")
+
+    vanished_col = _as_bool(stats["vanished"])
 
     # The loadings are a ReLU of the latent (positive side only) and the factors
     # are the positive OOD log-fold-change, so `vanished_positive_direction` is
@@ -91,7 +99,8 @@ def select_factors(
     # stops being true rather than quietly picking one.
     pos_col = "vanished_positive_direction"
     if pos_col in stats.columns:
-        disagree = stats.index[stats["vanished"] != stats[pos_col]].tolist()
+        pos_vanished_col = _as_bool(stats[pos_col])
+        disagree = stats.index[vanished_col != pos_vanished_col].tolist()
         if disagree:
             log(
                 f"WARNING: `vanished` and `{pos_col}` disagree on {disagree}. "
@@ -101,7 +110,7 @@ def select_factors(
 
     rows = []
     for dim in dim_names:
-        vanished = bool(stats.loc[dim, "vanished"])
+        vanished = bool(vanished_col.loc[dim])
         reason = ""
         if exclude_vanished and vanished:
             reason = "vanished"
@@ -134,23 +143,6 @@ def kept_dims(fmap: pd.DataFrame) -> list[str]:
 # The result h5ad -- obs = cells, var = one row per latent dimension, built and
 # written with plain anndata calls at the call site (see the getting-started guide)
 # ---------------------------------------------------------------------------
-
-def latent_stats_from_embed(embed) -> pd.DataFrame:
-    """``embed.var`` reshaped to the ``dim, vanished, ...`` frame :func:`select_factors`
-    expects.
-
-    DRVI's own ``model.set_latent_dimension_stats`` already wrote these columns onto
-    ``embed.var`` when the object was built (see the getting-started guide's training
-    example), so there is no file to read -- this just gives the in-memory table the
-    shape the rest of this module was written against.
-    """
-    frame = embed.var.reset_index(names="dim")
-    frame["dim"] = frame["dim"].astype(str)
-    for column in ("vanished", "vanished_positive_direction", "vanished_negative_direction"):
-        if column in frame.columns:
-            frame[column] = _as_bool(frame[column])
-    return frame
-
 
 def kept_loadings(embed, fmap: pd.DataFrame):
     """cells x kept-dims, straight from a result h5ad's signed ``X`` -- no ReLU.
