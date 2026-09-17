@@ -44,7 +44,9 @@ __all__ = [
     "LDSC_SHA256",
     "LDSC_ENV_VAR",
     "LdscBinary",
+    "cache_root",
     "ldsc_cache_dir",
+    "download_file",
     "asset_for_platform",
     "ensure_ldsc",
     "binary_version",
@@ -106,19 +108,28 @@ class LdscBinary:
         return str(self.path)
 
 
-def ldsc_cache_dir(version: str = LDSC_VERSION) -> Path:
-    """Where a downloaded binary is kept.
+def cache_root() -> Path:
+    """Where this package's downloaded/cached artifacts live, before any per-artifact
+    subpath is appended.
 
     ``$SCADS_DRVI_CACHE`` wins, then ``$XDG_CACHE_HOME``, then ``~/.cache`` -- so a
-    cluster with a small home directory can point it at scratch.
+    cluster with a small home directory can point it at scratch. Shared by
+    :func:`ldsc_cache_dir` (this module's own binary cache) and
+    :func:`~scads_drvi.enrich.reference.reference_cache_dir` (the much larger
+    reference-dataset cache) so the two never drift out of sync on how the env vars
+    are resolved.
     """
     root = os.environ.get("SCADS_DRVI_CACHE")
     if root:
-        base = Path(root)
-    else:
-        xdg = os.environ.get("XDG_CACHE_HOME")
-        base = Path(xdg) if xdg else Path.home() / ".cache"
-    return base / "scads_drvi" / "ldsc" / version
+        return Path(root)
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    return Path(xdg) if xdg else Path.home() / ".cache"
+
+
+def ldsc_cache_dir(version: str = LDSC_VERSION) -> Path:
+    """Where a downloaded binary is kept. See :func:`cache_root` for the env-var
+    resolution this builds on."""
+    return cache_root() / "scads_drvi" / "ldsc" / version
 
 
 def asset_for_platform(
@@ -138,6 +149,22 @@ def asset_for_platform(
             f"`cargo install ldsc --version {LDSC_VERSION.lstrip('v')}` and point "
             f"${LDSC_ENV_VAR} at the result."
         ) from None
+
+
+def download_file(url: str, dest: Path, *, timeout: int = 300) -> None:
+    """Stream `url` to `dest`, atomically -- `dest` never exists half-written.
+
+    Downloads to a ``.partial.{pid}`` sibling first, then renames onto `dest` only
+    once the transfer completes. Shared by :func:`ensure_ldsc` (this module) and
+    :func:`~scads_drvi.enrich.reference.ensure_baseline_ukb`, whose only difference
+    is `timeout` (seconds for a request that can be gigabytes).
+    """
+    import urllib.request
+
+    tmp = dest.with_suffix(dest.suffix + f".partial.{os.getpid()}")
+    with urllib.request.urlopen(url, timeout=timeout) as response, tmp.open("wb") as out:
+        shutil.copyfileobj(response, out)
+    tmp.replace(dest)
 
 
 def _sha256(path: Path, block: int = 1 << 20) -> str:
@@ -248,12 +275,7 @@ def ensure_ldsc(
     archive = cache_dir / asset
 
     if not archive.exists():
-        import urllib.request
-
-        tmp = archive.with_suffix(archive.suffix + f".partial.{os.getpid()}")
-        with urllib.request.urlopen(url, timeout=300) as response, tmp.open("wb") as out:
-            shutil.copyfileobj(response, out)
-        tmp.replace(archive)
+        download_file(url, archive, timeout=300)
 
     want = LDSC_SHA256.get(asset)
     if want is None:

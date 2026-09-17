@@ -31,7 +31,6 @@ integrity check.
 
 from __future__ import annotations
 
-import os
 import tarfile
 from pathlib import Path
 
@@ -57,18 +56,15 @@ BASELINE_UKB_STEM_NAME = "baselineLF2.2.UKB."
 def reference_cache_dir() -> Path:
     """Where the default reference dataset is cached.
 
-    Mirrors :func:`~scads_drvi.enrich.binary.ldsc_cache_dir`'s resolution:
-    ``$SCADS_DRVI_CACHE`` wins, then ``$XDG_CACHE_HOME``, then ``~/.cache``. Point
-    ``$SCADS_DRVI_CACHE`` at scratch storage before first use here -- this reference is
-    gigabytes, not the few megabytes the ldsc binary itself needs.
+    Builds on :func:`~scads_drvi.enrich.binary.cache_root`, the same env-var
+    resolution (``$SCADS_DRVI_CACHE`` wins, then ``$XDG_CACHE_HOME``, then
+    ``~/.cache``) the ldsc binary's own cache uses. Point ``$SCADS_DRVI_CACHE`` at
+    scratch storage before first use here -- this reference is gigabytes, not the
+    few megabytes the ldsc binary itself needs.
     """
-    root = os.environ.get("SCADS_DRVI_CACHE")
-    if root:
-        base = Path(root)
-    else:
-        xdg = os.environ.get("XDG_CACHE_HOME")
-        base = Path(xdg) if xdg else Path.home() / ".cache"
-    return base / "scads_drvi" / "ldsc_reference"
+    from scads_drvi.enrich.binary import cache_root
+
+    return cache_root() / "scads_drvi" / "ldsc_reference"
 
 
 def ensure_baseline_ukb(
@@ -98,16 +94,9 @@ def ensure_baseline_ukb(
     cache_dir.mkdir(parents=True, exist_ok=True)
     archive = cache_dir / "baselineLF_v2.2.UKB.tar.gz"
     if not archive.exists():
-        import shutil
-        import urllib.request
+        from scads_drvi.enrich.binary import download_file
 
-        tmp = archive.with_suffix(archive.suffix + f".partial.{os.getpid()}")
-        with (
-            urllib.request.urlopen(BASELINE_UKB_URL, timeout=3600) as response,
-            tmp.open("wb") as out,
-        ):
-            shutil.copyfileobj(response, out)
-        tmp.replace(archive)
+        download_file(BASELINE_UKB_URL, archive, timeout=3600)
 
     with tarfile.open(archive) as tf:
         tf.extractall(cache_dir)  # noqa: S202 -- our own pinned URL, not user input
