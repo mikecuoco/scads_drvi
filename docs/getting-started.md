@@ -53,12 +53,12 @@ embed = ad.AnnData(
     model.get_latent_representation(adata),
     obs=adata.obs[["cell_type", "tissue", "donor"]].copy(),
 )
-embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+embed.var_names = [f"dr_{i}" for i in range(embed.n_vars)]
 model.set_latent_dimension_stats(embed)   # vanished, order, title, and friends
 embed.obsm["X_umap"] = umap.UMAP().fit_transform(embed.X)   # set once computed, not read
 
 embed.uns["provenance"] = {"n_latent": 96, "batch_key": "donor", "model_dir": "my_fit/model"}
-embed.write_h5ad("my_fit.h5ad")
+embed.write_h5ad("my_fit_cells.h5ad")
 ```
 
 `embed.var` is populated by DRVI's own per-dimension statistics
@@ -68,6 +68,29 @@ embed.write_h5ad("my_fit.h5ad")
 in-house plotting -- `scads_drvi.pl.umap.latent_umap_grid` and
 `scads_drvi.pl.factors.latent_dimension_stats`/`latent_heatmap` -- which wrap
 `scanpy.pl.embedding`/`seaborn.heatmap` directly and need no `drvi-py` install.
+
+### The other half: peaks x factors
+
+`embed` is cells x factors. A fit's other half, peaks x factors, is a separate
+`AnnData` -- this package keeps the two apart rather than putting both axes on one
+object, because cells x factors is the shape every downstream function here (and
+DRVI's own interpretability functions) expects `embed` to have.
+
+DRVI is a nonlinear VAE, so there is no linear loadings matrix to read off a weight
+tensor. `get_effect_of_splits_within_distribution` is DRVI's own way of asking "how
+much does perturbing factor k move peak j's reconstruction", aggregated over cells
+weighted by how active each factor is in each cell:
+
+```python
+effect = model.get_effect_of_splits_within_distribution(
+    directional=False, aggregations="max"
+)["max"]   # (n_latent, n_peaks), non-negative
+
+feature_loadings = ad.AnnData(effect.T, obs=adata.var[[]].copy())   # peaks x factors
+feature_loadings.obs_names = adata.var_names   # peak ids, e.g. "chr1:1000-1500"
+feature_loadings.var_names = embed.var_names   # same dr_0..dr_{K-1} naming as embed
+feature_loadings.write_h5ad("my_fit_peaks.h5ad")
+```
 
 Loading a checkpoint back is the same `DRVI.load` call DRVI's own tutorial shows —
 register `adata` with the **same** `batch_key` the fit was trained with (nothing checks
@@ -84,10 +107,10 @@ embed = ad.AnnData(
     model.get_latent_representation(adata),
     obs=adata.obs[["cell_type", "tissue", "donor"]].copy(),
 )
-embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+embed.var_names = [f"dr_{i}" for i in range(embed.n_vars)]
 model.set_latent_dimension_stats(embed)
 embed.uns["provenance"] = {"n_latent": 96, "batch_key": "donor"}
-embed.write_h5ad("my_fit.h5ad")
+embed.write_h5ad("my_fit_cells.h5ad")
 ```
 
 ## Reading a finished run
@@ -95,36 +118,138 @@ embed.write_h5ad("my_fit.h5ad")
 ```python
 import anndata as ad
 
-embed = ad.read_h5ad("my_fit.h5ad")
+embed = ad.read_h5ad("my_fit_cells.h5ad")
 embed.var["vanished"]          # DRVI's own per-dimension flag
 embed.obsm["X_umap"]           # the embedding, if one was attached
 ```
 
-## Attaching enrichment results
+## Running S-LDSC enrichment
 
-S-LDSC has no DRVI equivalent, so this package still runs it and reads its output — but
-the result now lives in the same h5ad, as one tidy table keyed by `dim` and `direction`
-(there is no persisted `dim_j/pos`/`dim_j/neg` split; a directional loadings view is
-derived on demand, see below):
+S-LDSC has no DRVI equivalent, so this package still runs it and reads its output. It
+is provided by a pinned, checksum-verified Rust binary (`LdscRun.ensure`, below)
+rather than the Python original.
+
+First, select which dimensions get enriched and under which `k` index, and write each
+one's non-negative loadings out as a full-format annotation (`CHR SNP BP CM` +
+annotation — the Rust binary rejects the thin, identifier-free format the Python LDSC
+tolerated):
 
 ```python
-from scads_drvi.enrich.config import kept_dims, latent_stats_from_embed, select_factors
-from scads_drvi.enrich.ldsc import read_results
+from scads_drvi.enrich.annotations import read_bim, write_full_annot
+from scads_drvi.enrich.config import kept_dims, select_factors
+from scads_drvi.enrich.run import LdscRun
 
-stats = latent_stats_from_embed(embed)
-fmap = select_factors(stats, list(embed.var_names))
+fmap = select_factors(embed.var, list(embed.var_names))
 keep = kept_dims(fmap)                       # dims that survive vanished-filtering
 annot2dim = {f"k{i + 1}": dim for i, dim in enumerate(keep)}
 
-results = read_results(results_root, traits=("trait_a", "trait_b"), annot2dim=annot2dim)
+bim = read_bim("1000G.EUR.QC.1.bim")
+
+for annot, dim in annot2dim.items():
+    thin = ...  # peaks -> per-SNP annotation for `dim`, one 0/1+ column, in bim order
+    write_full_annot(f"annot/{annot}.1.annot.gz", thin, bim)
+
+# resolves/downloads/checksum-verifies the pinned v0.5.0 binary; bfile/w_ld_chr/
+# overlap_annot are set once and reused by every l2/h2 call below. l2() defaults to
+# --sketch 200 --snp-level-masking for speed (see LdscRun's docstring); pass
+# sketch=None, snp_level_masking=False for a bit-identical-to-Python run instead.
+run = LdscRun.ensure(bfile="1000G.EUR.QC.1", w_ld_chr="weights.", overlap_annot=True)
+for annot in annot2dim:
+    run.l2(f"annot/{annot}.1.annot.gz", f"ld/{annot}.1")
+    run.h2("trait_a.sumstats.gz", f"ld/{annot}.", f"results/trait_a/{annot}")
+```
+
+Reading the results back attaches one tidy table, keyed by `dim` and `direction`, into
+the same h5ad (there is no persisted `dim_j/pos`/`dim_j/neg` split; a directional
+loadings view is derived on demand, see below):
+
+```python
+results = run.read_results(results_root, traits=("trait_a", "trait_b"), annot2dim=annot2dim)
 embed.uns.setdefault("enrich", {})["my_arm"] = {
     "results": results,
     "factor_selection": fmap.drop(columns="annot_index"),
 }
-embed.write_h5ad("my_fit.h5ad")
+embed.write_h5ad("my_fit_cells.h5ad")
 
 arm = embed.uns["enrich"]["my_arm"]
 arm["results"].query("direction == 'pos' and trait == 'trait_a'")
+```
+
+### The real sweep: `EnrichmentSweep`
+
+The manual loop above is a single-chromosome toy example. A real run sweeps every
+kept factor, both loading directions, and every chromosome — hours, not seconds.
+`EnrichmentSweep` does that whole loop (factor selection, per-chromosome `l2`, `h2`
+against a baseline reference, and `read_results`) from just `embed` (an h5ad path by
+default), a reference panel, and sumstats. Peak-to-SNP annotation building is still
+yours — this package has never owned that overlap, only what's downstream of it:
+
+```python
+from scads_drvi.enrich.sweep import EnrichmentSweep
+
+def annotate(dim, direction, chrom, bim):
+    ...  # your own peak -> per-SNP overlap for this (dim, direction, chromosome)
+    return hit  # 1-D array-like, len(bim), in bim's row order
+
+sweep = EnrichmentSweep.ensure(
+    embed="my_fit_cells.h5ad",                       # loaded once, exposed as sweep.adata
+    bfile_chr=f"{REF}/plink_files/1000G.EUR.hg38.{{chrom}}",
+    w_ld_chr=f"{REF}/weights/weights.hm3_noMHC.",
+    frqfile_chr=f"{REF}/plink_files/1000G.EUR.hg38.",
+    sumstats={"trait_a": "trait_a.sumstats.gz", "trait_b": "trait_b.sumstats.gz"},
+    annotate=annotate,
+)
+# ref_ld_chr_extra defaults to the baseline-LF v2.2 UK Biobank reference (in-sample
+# LD, preferred over 1000G for a UKB-scale GWAS) -- downloaded once (~11 GB) and
+# cached; point $SCADS_DRVI_CACHE at scratch storage first. Pass
+# ref_ld_chr_extra=() for no baseline categories, or your own stem(s) instead.
+# l2's sketch follows suit: 5000 with the UKB default (matching that scale),
+# 200 -- LdscRun's own default -- once ref_ld_chr_extra is overridden away from it
+# (e.g. to a 1000G-based baseline, a couple orders of magnitude smaller).
+
+results = sweep.run()   # run_l2() -> run_h2() -> read_results(), each independently
+                         # resumable (skips work whose output already exists)
+sweep.adata.uns.setdefault("enrich", {})["my_arm"] = {
+    "results": results, "factor_selection": sweep.fmap.drop(columns="annot_index")
+}
+sweep.adata.write_h5ad("my_fit_cells.h5ad")
+```
+
+## Annotating peaks (motif enrichment)
+
+Independent of the LDSC path, and works on **peaks**, not cells: it reads back the
+`feature_loadings` h5ad written above rather than `embed`, matches it onto a region x
+motif score database (aertslab's public SCREEN cisTarget database, resolved and cached
+by `annotate.resources`), and scores it against an exact, never-sampled permutation
+null, stratified by each region's GC content and width. It reuses the `fmap` the
+enrichment step above computed, so a factor `select_factors` dropped there (e.g.
+`vanished`) is dropped here too:
+
+```python
+import anndata as ad
+import numpy as np
+
+from scads_drvi.annotate.motif import build_region_map, gc_width_strata, regionise, weighted_motif_enrichment
+from scads_drvi.annotate.resources import ensure_screen_database, read_score_db_regions
+from scads_drvi.enrich.config import kept_feature_loadings
+
+feature_loadings = ad.read_h5ad("my_fit_peaks.h5ad")   # peaks x dims
+peak_loadings = kept_feature_loadings(feature_loadings, fmap)     # peaks x keep, same dims as above
+W = np.clip(peak_loadings.to_numpy(), 0, None).T                  # (K, n_peaks), non-negative
+
+db_path = ensure_screen_database("hg38", "v10_clust", allow_download=True)   # ~14 GB, cached after
+used_cols, peak_rows, region_names = build_region_map(
+    peak_loadings.index, read_score_db_regions(db_path)
+)
+keep_mask, strata_ix, n_strata = gc_width_strata(region_names, "genome.fa")
+
+Wr = regionise(W, peak_rows)[:, keep_mask]   # (K, n_regions), averaged onto db regions
+rows, meta = weighted_motif_enrichment(
+    Wr, labels=peak_loadings.columns, used_cols=used_cols[keep_mask],
+    region_names=[r for r, k in zip(region_names, keep_mask) if k],
+    strata_ix=strata_ix, n_strata=n_strata, db_path=db_path,
+)
+# one row per (factor, motif): weighted_score, nes, nes_unstratified
 ```
 
 ## Computing cell scores

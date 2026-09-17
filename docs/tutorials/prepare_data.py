@@ -71,9 +71,16 @@ def prepare_atac_rna(matrix_path: Path, data_dir: Path = DATA) -> tuple[Path, Pa
         print(f"already prepared: {rna_path}, {atac_path}")
         return rna_path, atac_path
 
+    import warnings
+
     import scanpy as sc
 
-    raw = sc.read_10x_h5(matrix_path, gex_only=False)
+    # Combined RNA+ATAC 10x matrices genuinely have duplicate var_names (gene-symbol
+    # collisions) -- var_names_make_unique() on the next line already fixes this, so
+    # the read's own UserWarning about it is expected and silenced here, not left to fire.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Variable names are not unique")
+        raw = sc.read_10x_h5(matrix_path, gex_only=False)
     raw.var_names_make_unique()
 
     rna = raw[:, raw.var["feature_types"] == "Gene Expression"].copy()

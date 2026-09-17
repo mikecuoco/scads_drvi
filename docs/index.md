@@ -30,11 +30,16 @@ takes an explicit path, a bare read is just `anndata.read_h5ad(path)`, a write i
 | module | role |
 |---|---|
 | `stats` | one-tailed p, Benjamini–Hochberg, BH-boundary z |
-| `enrich.binary` | the pinned Rust LDSC: resolve, verify, build safe commands |
-| `enrich.h2_output` | parse what `ldsc h2` prints |
-| `enrich.config` | enrichment config loading and factor selection |
+| `enrich.binary` | resolve/download/verify the pinned Rust LDSC binary |
+| `enrich.run` | `LdscRun`: builds and runs one safe `l2`/`h2` call against that binary |
+| `enrich.sweep` | `EnrichmentSweep`: embed + reference panel + sumstats -> the full `l2`/`h2` sweep -> results |
+| `enrich.reference` | the default S-LDSC baseline reference (UKB baseline-LF v2.2): cache/verify/download |
+| `enrich.annotations` | thin/full annotation file widening `--overlap-annot` requires |
+| `enrich.config` | factor selection: which DRVI latent dimensions get enriched |
 | `enrich.ldsc` | read `.results` files into one tidy `dim`/`direction`/`trait` table |
 | `scores.cell` / `.aggregate` | the two `CS_i` formulas; group summaries and matrices |
+| `annotate.motif` / `.gc` | weighted factor-motif enrichment against a region x motif score database, calibrated by an exact (never sampled) permutation null |
+| `annotate.resources` | resolves aertslab's public SCREEN cisTarget score database (cache/verify/opt-in download, ~14 GB) |
 | `pl.*` | style, colour policy, frugal boxes, and every figure — including its own in-house per-dimension UMAP grid, stats plot and category heatmap |
 
 Where DRVI's own package (`drvi-py`) already computes something — per-dimension
@@ -65,7 +70,7 @@ model.train(max_epochs=200)
 model.save("my_fit/model", overwrite=True)
 
 embed = ad.AnnData(model.get_latent_representation(adata), obs=adata.obs[["cell_type"]].copy())
-embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
+embed.var_names = [f"dr_{i}" for i in range(embed.n_vars)]
 model.set_latent_dimension_stats(embed)
 embed.obsm["X_umap"] = umap.UMAP().fit_transform(embed.X)   # set once computed, not read
 embed.uns["provenance"] = {"n_latent": 96}

@@ -5,6 +5,22 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **New tutorial: `docs/tutorials/ddp_benchmark.ipynb` trains DRVI under multi-GPU DDP
+  and benchmarks it against a single-GPU baseline.** Covers the notebook-safe Lightning
+  strategy aliases (`ddp_notebook_find_unused_parameters_true`/`_false`) `DRVI.train`
+  accepts through `**trainer_kwargs`; why `find_unused_parameters=False` actually
+  *fails* for DRVI trained the ordinary way -- `DRVIModule`'s `VAE` base class
+  unconditionally builds an `l_encoder` submodule that only participates in the
+  forward pass when `use_observed_lib_size=False`, so under DRVI's (and `VAE`'s) own
+  default of `True` it's a real, structural unused parameter, not a data-dependent one
+  -- reproduced as an executed, on-purpose failure in the notebook, not just asserted;
+  the `model.trainer.is_global_zero` rank guard `BaseModelClass.save()` needs under
+  DDP; and why each config trains in its own subprocess rather than sharing this
+  repo's usual single-process notebook convention (CUDA can't be re-initialized in a
+  process that forks after already touching it, and Lightning's notebook DDP
+  strategies fork from whichever process calls `.train()`).
+
 ### Changed
 - **`pl.factors.latent_heatmap` gains optional heritability/cell-score marginal panels
   and a directional split, rather than a second `latent_heatmap_with_heritability`

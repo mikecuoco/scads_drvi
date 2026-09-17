@@ -497,8 +497,8 @@ def latent_heatmap(
     (a per-dim Series, indexed like `embed.var_names` -- or, when `directional=True`,
     like the doubled ``"{dim}+"``/``"{dim}-"`` index above -- reindexed to this
     heatmap's own column order) adds a bar above the heatmap -- pass `heritability_se`
-    (same index, e.g. an LDSC `.results` table's own ``Coefficient_std_error``, see
-    :mod:`scads_drvi.enrich.h2_output`) to draw it with error bars, and `heritability_q`
+    (same index, e.g. an LDSC `.results` table's own ``Coefficient_std_error``) to draw
+    it with error bars, and `heritability_q`
     (same index) to colour it by BH-significance and draw its boundary line, as
     :func:`scads_drvi.pl.enrichment.heritability_landscape` does. Passing `cell_scores`
     (a per-cell Series indexed like `embed.obs_names`) adds a bar to the right showing
@@ -575,6 +575,11 @@ def latent_heatmap(
         if directional
         else {"cmap": cmap, "vcenter": 0}
     )
+    # Whichever slice above (remove_vanished/make_balanced) ran last may still leave
+    # embed a view -- sc.pl.heatmap below mutates it in place (sanitizing `.obs`,
+    # then assigning a `.uns` colors key), which warns unless it's an actual AnnData.
+    if embed.is_view:
+        embed = embed.copy()
     axes = sc.pl.heatmap(
         embed, vars_to_show, categorical_column, gene_symbols=title_col,
         figsize=call_figsize, show_gene_labels=True, show=False,
