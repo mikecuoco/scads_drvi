@@ -126,8 +126,8 @@ embed.obsm["X_umap"]           # the embedding, if one was attached
 ## Running S-LDSC enrichment
 
 S-LDSC has no DRVI equivalent, so this package still runs it and reads its output. It
-is provided by a pinned, checksum-verified Rust binary
-(`scads_drvi.enrich.binary.ensure_ldsc`) rather than the Python original.
+is provided by a pinned, checksum-verified Rust binary (`LdscRun.ensure`, below)
+rather than the Python original.
 
 First, select which dimensions get enriched and under which `k` index, and write each
 one's non-negative loadings out as a full-format annotation (`CHR SNP BP CM` +
