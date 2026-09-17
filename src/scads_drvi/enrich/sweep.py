@@ -21,7 +21,7 @@ import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from scads_drvi.enrich.annotations import read_bim, write_full_annot
 from scads_drvi.enrich.run import LDSC_VERSION, LdscRun
@@ -39,8 +39,9 @@ _COMBINED = ("combined",)
 
 #: Sentinel distinguishing "use the default" (:meth:`EnrichmentSweep.ensure` resolves
 #: the UKB baseline reference) from an explicit per-call value, including `()` --
-#: deliberately no baseline categories at all.
-_UNSET = object()
+#: deliberately no baseline categories at all. Typed `Any` so it can stand in as the
+#: default for whichever concrete parameter type it sentinels.
+_UNSET: Any = object()
 
 
 def _key(dim: str, direction: str) -> str:
@@ -101,6 +102,8 @@ class EnrichmentSweep:
         # at its own module scope (see its docstring); importing from it here, not at
         # this module's top, keeps `import scads_drvi.enrich.sweep` itself as cheap as
         # every other enrich module until an EnrichmentSweep actually gets built.
+        import pandas as pd
+
         from scads_drvi.enrich.config import kept_dims, select_factors
 
         if isinstance(self.embed, (str, Path)):
@@ -135,8 +138,14 @@ class EnrichmentSweep:
                 "set). Better to fail now than after chromosomes of l2 computation."
             )
 
+        var = self.adata.var
+        if not isinstance(var, pd.DataFrame):
+            raise TypeError(
+                "EnrichmentSweep needs an in-memory AnnData (pandas .var); a "
+                "lazy/backed .var (e.g. scvi-tools' Dataset2D) is not supported here."
+            )
         self.fmap = select_factors(
-            self.adata.var,
+            var,
             list(self.adata.var_names),
             exclude_vanished=self.exclude_vanished,
             exclude_dims=self.exclude_dims,
@@ -166,13 +175,22 @@ class EnrichmentSweep:
         return {key: direction for key, _, direction in self._keys(dims, directions)}
 
     def _ld_out(self, key: str, chrom: int) -> Path:
-        return self.ldscore_dir / f"{key}.{chrom}"
+        # __post_init__ always resolves ldscore_dir/results_dir to a concrete Path;
+        # the field stays str | Path | None for the constructor's own ergonomics.
+        return cast(Path, self.ldscore_dir) / f"{key}.{chrom}"
 
-    def _ref_ld_chr(self, key: str) -> list[str]:
-        return [str(self.ldscore_dir / key) + "."] + [str(p) for p in self.ref_ld_chr_extra]
+    def _ref_ld_chr(self, key: str) -> list[str | Path]:
+        # list[str] annotated as list[str | Path]: list is invariant, so h2()'s own
+        # `str | Path | list[str | Path]` parameter needs the wider element type here
+        # even though every element built below is always a str.
+        return cast(
+            "list[str | Path]",
+            [str(cast(Path, self.ldscore_dir) / key) + "."]
+            + [str(p) for p in self.ref_ld_chr_extra],
+        )
 
     def _h2_out(self, trait: str, key: str) -> Path:
-        return self.results_dir / trait / key
+        return cast(Path, self.results_dir) / trait / key
 
     def run_l2(
         self,
@@ -181,7 +199,7 @@ class EnrichmentSweep:
         directions: Iterable[str] | None = None,
         chroms: Iterable[int] | None = None,
         force: bool = False,
-    ) -> list[subprocess.CompletedProcess]:
+    ) -> list[subprocess.CompletedProcess[str]]:
         """``l2`` for every (kept dim, direction, chromosome), resumable on the
         ``.l2.ldscore.gz`` a prior call already wrote."""
         import pandas as pd
@@ -214,7 +232,7 @@ class EnrichmentSweep:
         dims: Iterable[str] | None = None,
         directions: Iterable[str] | None = None,
         force: bool = False,
-    ) -> list[subprocess.CompletedProcess]:
+    ) -> list[subprocess.CompletedProcess[str]]:
         """``h2`` for every (trait, kept dim, direction), resumable on the ``.results``
         a prior call already wrote."""
         completed = []
@@ -236,19 +254,19 @@ class EnrichmentSweep:
         return completed
 
     def read_results(
-        self, *, traits: Iterable[str] | None = None, **kwargs
+        self, *, traits: Iterable[str] | None = None, **kwargs: Any
     ) -> pd.DataFrame:
         """:meth:`~scads_drvi.enrich.run.LdscRun.read_results` for this sweep's
         `annot2dim`/`direction_map`."""
         return self.ldsc_run.read_results(
-            self.results_dir,
+            cast(Path, self.results_dir),
             traits=list(traits) if traits is not None else list(self.sumstats),
             annot2dim=self.annot2dim(),
             direction=self.direction_map(),
             **kwargs,
         )
 
-    def run(self, *, force: bool = False, **read_kwargs) -> pd.DataFrame:
+    def run(self, *, force: bool = False, **read_kwargs: Any) -> pd.DataFrame:
         """``run_l2()`` then ``run_h2()`` then ``read_results()``."""
         self.run_l2(force=force)
         self.run_h2(force=force)
@@ -258,14 +276,14 @@ class EnrichmentSweep:
     def ensure(
         cls,
         *,
-        embed,
+        embed: str | Path | AnnData,
         bfile_chr: str,
         sumstats: Mapping[str, str | Path],
         annotate: Callable[[str, str, int, pd.DataFrame], object],
         w_ld_chr: str | Path,
         chroms: Sequence[int] = tuple(range(1, 23)),
-        ref_ld_chr_extra: Sequence[str | Path] | object = _UNSET,
-        sketch: int | None | object = _UNSET,
+        ref_ld_chr_extra: Sequence[str | Path] = _UNSET,
+        sketch: int | None = _UNSET,
         frqfile_chr: str | Path | None = None,
         print_snps: str | Path | None = None,
         print_coefficients: bool = True,
@@ -284,7 +302,7 @@ class EnrichmentSweep:
         check_version: bool = True,
         reference_cache: str | Path | None = None,
         allow_reference_download: bool = True,
-        **ldsc_kwargs,
+        **ldsc_kwargs: Any,
     ) -> EnrichmentSweep:
         """:meth:`~scads_drvi.enrich.run.LdscRun.ensure` then wrap it -- the common case.
 
