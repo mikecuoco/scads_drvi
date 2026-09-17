@@ -82,11 +82,10 @@ annotation, widened to the full format the Rust binary requires, then run throug
 import numpy as np
 
 from scads_drvi.enrich.annotations import read_bim, write_full_annot
-from scads_drvi.enrich.config import kept_dims, latent_stats_from_embed, select_factors
+from scads_drvi.enrich.config import kept_dims, select_factors
 from scads_drvi.enrich.run import LdscRun
 
-stats = latent_stats_from_embed(embed)
-fmap = select_factors(stats, list(embed.var_names))
+fmap = select_factors(embed.var, list(embed.var_names))
 keep = kept_dims(fmap)                       # dims that survive vanished-filtering
 annot2dim = {f"k{i + 1}": dim for i, dim in enumerate(keep)}
 

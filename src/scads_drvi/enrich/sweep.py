@@ -101,7 +101,7 @@ class EnrichmentSweep:
         # at its own module scope (see its docstring); importing from it here, not at
         # this module's top, keeps `import scads_drvi.enrich.sweep` itself as cheap as
         # every other enrich module until an EnrichmentSweep actually gets built.
-        from scads_drvi.enrich.config import kept_dims, latent_stats_from_embed, select_factors
+        from scads_drvi.enrich.config import kept_dims, select_factors
 
         if isinstance(self.embed, (str, Path)):
             import anndata as ad
@@ -135,9 +135,8 @@ class EnrichmentSweep:
                 "set). Better to fail now than after chromosomes of l2 computation."
             )
 
-        stats = latent_stats_from_embed(self.adata)
         self.fmap = select_factors(
-            stats,
+            self.adata.var,
             list(self.adata.var_names),
             exclude_vanished=self.exclude_vanished,
             exclude_dims=self.exclude_dims,
