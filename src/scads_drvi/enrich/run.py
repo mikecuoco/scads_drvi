@@ -43,13 +43,13 @@ class LdscRun:
     run -- e.g. a per-chromosome sweep passes a different `bfile` to each :meth:`l2`
     call while everything else stays fixed.
 
-    `sketch` and `snp_level_masking` default to on (``5000`` and ``True``) for speed:
+    `sketch` and `snp_level_masking` default to on (``200`` and ``True``) for speed:
     the Rust binary's own ``l2 --help`` calls ``d <= 50`` numerically unstable and
-    ``d=200`` "the practical sweet spot", so ``5000`` is comfortably past both, and
-    ``snp_level_masking`` is described there as exact-and-free rather than
-    approximate. Because ``--python-compat`` disables ``snp_level_masking`` on the
-    binary itself (it exists to reproduce Python LDSC's chunk-level approximation
-    exactly), `python_compat` defaults to `False` here to match -- the opposite of
+    names ``d=200`` "the practical sweet spot" directly, and ``snp_level_masking`` is
+    described there as exact-and-free rather than approximate. Because
+    ``--python-compat`` disables ``snp_level_masking`` on the binary itself (it exists
+    to reproduce Python LDSC's chunk-level approximation exactly), `python_compat`
+    defaults to `False` here to match -- the opposite of
     :func:`~scads_drvi.enrich.binary.run_ldsc`'s own default, which is bit-identical
     reproduction, not speed. `l2`'s `allow_approximate` gate on
     :func:`~scads_drvi.enrich.binary.run_ldsc` is derived automatically from whether an
@@ -65,7 +65,7 @@ class LdscRun:
     overlap_annot: bool = True
     threads: int | None = None
     python_compat: bool = False
-    sketch: int | None = 5000
+    sketch: int | None = 200
     snp_level_masking: bool = True
     check: bool = True
     dry_run: bool = False
