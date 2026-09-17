@@ -163,12 +163,15 @@ def covariate_strata(
     for g in np.where((counts > 0) & (counts < min_size))[0]:
         keep &= combined != g
     if keep.sum() != ok.sum():
-        log(f"dropping {int(ok.sum() - keep.sum()):,} region(s) in strata with "
-            f"< {min_size} members")
+        log(
+            f"dropping {int(ok.sum() - keep.sum()):,} region(s) in strata with < {min_size} members"
+        )
 
     uniq, strata_ix = np.unique(combined[keep], return_inverse=True)
-    log(f"{len(uniq)} strata over {int(keep.sum()):,} regions "
-        f"(median {int(np.median(np.bincount(strata_ix))):,} regions/stratum)")
+    log(
+        f"{len(uniq)} strata over {int(keep.sum()):,} regions "
+        f"(median {int(np.median(np.bincount(strata_ix))):,} regions/stratum)"
+    )
     return keep, strata_ix.astype(np.int32), len(uniq)
 
 
@@ -229,8 +232,11 @@ def build_region_map(
     db_region_names = list(db_region_names)
 
     joined = bioframe.overlap(
-        parse_peaks(peaks), parse_peaks(db_region_names),
-        how="inner", return_overlap=True, suffixes=("_1", "_2"),
+        parse_peaks(peaks),
+        parse_peaks(db_region_names),
+        how="inner",
+        return_overlap=True,
+        suffixes=("_1", "_2"),
     )
     if len(joined) == 0:
         raise ValueError(
@@ -261,9 +267,11 @@ def build_region_map(
     peak_rows = [np.asarray(by_region[c], dtype=np.int64) for c in used_cols]
     region_names = [db_region_names[c] for c in used_cols]
     n_peaks_hit = len({r for rows in peak_rows for r in rows})
-    log(f"matched {len(used_cols):,} / {len(db_region_names):,} db regions "
+    log(
+        f"matched {len(used_cols):,} / {len(db_region_names):,} db regions "
         f"({100 * len(used_cols) / len(db_region_names):.1f}%), covering "
-        f"{n_peaks_hit:,} / {len(peaks):,} peaks ({100 * n_peaks_hit / len(peaks):.1f}%)")
+        f"{n_peaks_hit:,} / {len(peaks):,} peaks ({100 * n_peaks_hit / len(peaks):.1f}%)"
+    )
     return used_cols, peak_rows, region_names
 
 
@@ -294,22 +302,22 @@ def read_score_db_regions(db_path: str | Path, motif_id_column: str = "motifs") 
     names = ds.dataset(db_path, format="feather").schema.names
     if names[-1] != motif_id_column:
         raise ValueError(
-            f"expected the last column of {db_path} to be {motif_id_column!r}, "
-            f"got {names[-1]!r}"
+            f"expected the last column of {db_path} to be {motif_id_column!r}, got {names[-1]!r}"
         )
     return names[:-1]
 
 
-def read_score_db_motif_ids(db_path: str | Path, motif_id_column: str = "motifs") -> list:
+def read_score_db_motif_ids(db_path: str | Path, motif_id_column: str = "motifs") -> list[str]:
     """The motif-id column of a region x motif score database, in row order."""
     import pyarrow.dataset as ds
 
-    return (
+    values = (
         ds.dataset(db_path, format="feather")
         .to_table(columns=[motif_id_column])
         .column(0)
         .to_pylist()
     )
+    return [str(v) for v in values]
 
 
 def stream_accumulate(
@@ -320,7 +328,7 @@ def stream_accumulate(
     n_strata: int,
     slab: int = DEFAULT_SLAB,
     expect_names: Sequence[str] | None = None,
-):
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """One contiguous pass over the score database.
 
     Contiguity is the whole trick: scattered column selections above a few thousand
@@ -346,7 +354,9 @@ def stream_accumulate(
     B = np.zeros((len(strata_ix), n_strata), dtype=np.float32)
     B[np.arange(len(strata_ix)), strata_ix] = 1.0
 
-    T = sumS = sumS2 = None
+    T: np.ndarray | None = None
+    sumS: np.ndarray | None = None
+    sumS2: np.ndarray | None = None
     n_done = 0
     t0 = time.time()
     for lo in range(0, int(used_cols[-1]) + 1, slab):
@@ -357,7 +367,7 @@ def stream_accumulate(
         sel = used_cols[i0:i1]
         tbl = dataset.to_table(columns=schema_names[lo:hi], use_threads=True)
         names = tbl.column_names
-        X = np.empty((tbl.num_rows, len(sel)), dtype=np.float32)   # (M, n_sel)
+        X = np.empty((tbl.num_rows, len(sel)), dtype=np.float32)  # (M, n_sel)
         for j, c in enumerate(sel):
             X[:, j] = tbl.column(int(c) - lo).chunk(0).to_numpy(zero_copy_only=False)
         if expect_names is not None:
@@ -366,7 +376,7 @@ def stream_accumulate(
             assert got == want, f"slab/column misalignment at [{lo},{hi}): {got[:2]} != {want[:2]}"
         del tbl
 
-        if T is None:
+        if T is None or sumS is None or sumS2 is None:
             M = X.shape[0]
             T = np.zeros((K, M), dtype=np.float64)
             sumS = np.zeros((n_strata, M), dtype=np.float64)
@@ -377,30 +387,42 @@ def stream_accumulate(
         sumS2 += ((X * X) @ B[i0:i1]).T.astype(np.float64)
         n_done += len(sel)
         del X
-        log(f"  slab [{lo:,},{hi:,}) -> {len(sel):,} used ({n_done:,} total, "
-            f"{time.time() - t0:.0f}s)")
+        log(
+            f"  slab [{lo:,},{hi:,}) -> {len(sel):,} used ({n_done:,} total, "
+            f"{time.time() - t0:.0f}s)"
+        )
 
     assert n_done == len(used_cols), f"{n_done} != {len(used_cols)}"
+    assert T is not None and sumS is not None and sumS2 is not None, (
+        "no slabs were read -- used_cols is empty"
+    )
     return T, sumS, sumS2
 
 
 # --------------------------------------------------------------------------------------
 # the exact permutation null
 # --------------------------------------------------------------------------------------
-def stratified_nes(T, sumS, sumS2, Wr, strata_ix, n_strata):
+def stratified_nes(
+    T: np.ndarray,
+    sumS: np.ndarray,
+    sumS2: np.ndarray,
+    Wr: np.ndarray,
+    strata_ix: np.ndarray,
+    n_strata: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Exact permutation mean/sd from per-stratum moments; see the module docstring."""
-    n_g = np.bincount(strata_ix, minlength=n_strata).astype(np.float64)   # (G,)
+    n_g = np.bincount(strata_ix, minlength=n_strata).astype(np.float64)  # (G,)
     Wd = Wr.astype(np.float64)
     sumW = np.zeros((Wd.shape[0], n_strata))
     sumW2 = np.zeros((Wd.shape[0], n_strata))
     np.add.at(sumW.T, strata_ix, Wd.T)
     np.add.at(sumW2.T, strata_ix, (Wd * Wd).T)
 
-    SS_W = sumW2 - sumW**2 / np.maximum(n_g, 1)          # (K, G)
+    SS_W = sumW2 - sumW**2 / np.maximum(n_g, 1)  # (K, G)
     SS_S = sumS2 - sumS**2 / np.maximum(n_g, 1)[:, None]  # (G, M)
 
-    E = (sumW / np.maximum(n_g, 1)) @ sumS                       # (K, M)
-    var = (SS_W / np.maximum(n_g - 1, 1)) @ SS_S                 # (K, M)
+    E = (sumW / np.maximum(n_g, 1)) @ sumS  # (K, M)
+    var = (SS_W / np.maximum(n_g - 1, 1)) @ SS_S  # (K, M)
     sd = np.sqrt(np.maximum(var, 0.0))
     nes = np.divide(T - E, sd, out=np.zeros_like(T), where=sd > 0)
 
@@ -408,7 +430,9 @@ def stratified_nes(T, sumS, sumS2, Wr, strata_ix, n_strata):
     return nes, E, sd
 
 
-def unstratified_nes(T, sumS, sumS2, Wr):
+def unstratified_nes(
+    T: np.ndarray, sumS: np.ndarray, sumS2: np.ndarray, Wr: np.ndarray
+) -> np.ndarray:
     """Same statistic with a single stratum -- the un-corrected comparison column."""
     n = Wr.shape[1]
     Wd = Wr.astype(np.float64)
@@ -418,7 +442,10 @@ def unstratified_nes(T, sumS, sumS2, Wr):
     SS_S = sS2 - sS**2 / n
     E = np.outer(sW, sS) / n
     sd = np.sqrt(np.maximum(np.outer(SS_W, SS_S) / (n - 1), 0.0))
-    return np.divide(T - E, sd, out=np.zeros_like(T), where=sd > 0)
+    # `out=`/`where=` push np.divide's overload resolution to `Any`; the annotated
+    # local (rather than returning the call directly) keeps the declared -> np.ndarray.
+    result: np.ndarray = np.divide(T - E, sd, out=np.zeros_like(T), where=sd > 0)
+    return result
 
 
 # --------------------------------------------------------------------------------------
@@ -435,7 +462,7 @@ def weighted_motif_enrichment(
     slab: int = DEFAULT_SLAB,
     motif_id_column: str = "motifs",
     check_invariance: bool = False,
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, dict[str, int | float]]:
     """Score every (factor, motif) pair and assemble the result table.
 
     `Wr` is (K, n_regions) non-negative factor weights already mapped onto the score
@@ -471,7 +498,8 @@ def weighted_motif_enrichment(
     Wr = Wr / np.maximum(Wr.sum(axis=1, keepdims=True), 1e-30)
 
     T, sumS, sumS2 = stream_accumulate(
-        db_path, used_cols, Wr, strata_ix, n_strata, slab, expect_names=region_names)
+        db_path, used_cols, Wr, strata_ix, n_strata, slab, expect_names=region_names
+    )
     nes, _, _ = stratified_nes(T, sumS, sumS2, Wr, strata_ix, n_strata)
     nes_un = unstratified_nes(T, sumS, sumS2, Wr)
 
@@ -491,21 +519,26 @@ def weighted_motif_enrichment(
         raise ValueError(f"{len(motif_ids)} motif ids != {T.shape[1]} score columns")
 
     K, M = nes.shape
-    rows = pd.DataFrame({
-        "factor": np.repeat(labels, M),
-        "motif_id": np.tile(motif_ids, K),
-        "weighted_score": T.ravel(),
-        "nes": nes.ravel(),
-        "nes_unstratified": nes_un.ravel(),
-    })
+    rows = pd.DataFrame(
+        {
+            "factor": np.repeat(labels, M),
+            "motif_id": np.tile(motif_ids, K),
+            "weighted_score": T.ravel(),
+            "nes": nes.ravel(),
+            "nes_unstratified": nes_un.ravel(),
+        }
+    )
     if tf_of is not None:
         rows["tf_annotation"] = rows["motif_id"].map(tf_of)
     rows["n_regions"] = int(Wr.shape[1])
     rows = rows.sort_values(["factor", "nes"], ascending=[True, False]).reset_index(drop=True)
 
     meta = {
-        "n_regions": int(Wr.shape[1]), "n_factors": int(K), "n_motifs": int(M),
-        "n_strata": int(n_strata), "elapsed_s": round(time.time() - t0, 1),
+        "n_regions": int(Wr.shape[1]),
+        "n_factors": int(K),
+        "n_motifs": int(M),
+        "n_strata": int(n_strata),
+        "elapsed_s": round(time.time() - t0, 1),
     }
     log(f"scored {len(rows):,} (factor, motif) pairs in {time.time() - t0:.0f}s")
     return rows, meta

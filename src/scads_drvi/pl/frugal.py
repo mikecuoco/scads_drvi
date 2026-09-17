@@ -18,12 +18,13 @@ from __future__ import annotations
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 if TYPE_CHECKING:  # pragma: no cover
-    pass
+    from matplotlib.axes import Axes
 
 __all__ = ["WHIS_KINDS", "BoxStats", "box_stats", "box_stats_by_column", "draw_boxes"]
 
@@ -51,7 +52,7 @@ class BoxStats:
     def __len__(self) -> int:
         return len(self.labels)
 
-    def to_bxp(self) -> list[dict]:
+    def to_bxp(self) -> list[dict[str, Any]]:
         """The list of dicts ``Axes.bxp`` consumes."""
         return [
             {
@@ -67,7 +68,10 @@ class BoxStats:
         ]
 
     def order_by(
-        self, key: Literal["median", "q3", "label", "n"] = "median", *, ascending=False
+        self,
+        key: Literal["median", "q3", "label", "n"] = "median",
+        *,
+        ascending: bool = False,
     ) -> BoxStats:
         """Same boxes, reordered for an axis."""
         if key == "label":
@@ -125,8 +129,8 @@ def _whiskers(values: np.ndarray, q1: float, q3: float, whis: Whis) -> tuple[flo
 
 
 def box_stats(
-    values,
-    groups=None,
+    values: ArrayLike,
+    groups: ArrayLike | None = None,
     *,
     whis: Whis = "quartile",
     min_n: int = 1,
@@ -147,8 +151,7 @@ def box_stats(
         keys = pd.Series(np.asarray(groups)).astype(str)
         if len(keys) != len(series):
             raise ValueError(
-                f"values and groups must be the same length, got {len(series)} "
-                f"and {len(keys)}"
+                f"values and groups must be the same length, got {len(series)} and {len(keys)}"
             )
 
     labels: list[str] = []
@@ -186,7 +189,7 @@ def box_stats(
 
 
 def box_stats_by_column(
-    matrix,
+    matrix: ArrayLike,
     labels: Sequence[str] | None = None,
     *,
     whis: Whis = "quartile",
@@ -211,9 +214,7 @@ def box_stats_by_column(
         )
     labels = [str(label) for label in labels]
     if len(labels) != array.shape[1]:
-        raise ValueError(
-            f"{len(labels)} labels for {array.shape[1]} columns"
-        )
+        raise ValueError(f"{len(labels)} labels for {array.shape[1]} columns")
 
     if whis not in WHIS_KINDS:
         raise ValueError(f"unknown whis {whis!r}; choose from {list(WHIS_KINDS)}")
@@ -259,7 +260,7 @@ def box_stats_by_column(
     )
 
 
-def _orientation(vertical: bool) -> dict:
+def _orientation(vertical: bool) -> dict[str, Any]:
     """The box-orientation keyword this matplotlib accepts.
 
     ``vert=bool`` is deprecated from 3.11 and removed in 3.13; ``orientation=`` does not
@@ -279,7 +280,7 @@ def _orientation(vertical: bool) -> dict:
 
 
 def draw_boxes(
-    ax,
+    ax: Axes,
     stats: BoxStats,
     *,
     colors: Sequence[str] | None = None,

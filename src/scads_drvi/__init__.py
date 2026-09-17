@@ -22,6 +22,8 @@ names below resolve lazily for the same reason.
 
 from __future__ import annotations
 
+from typing import Any
+
 __version__ = "0.1.0"
 
 # name -> submodule it lives in. Resolved on first attribute access so that
@@ -31,7 +33,7 @@ _LAZY: dict[str, str] = {}
 __all__ = sorted(_LAZY)
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """Resolve a public name from its submodule on first access (PEP 562)."""
     try:
         module = _LAZY[name]

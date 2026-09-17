@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover
     from matplotlib.figure import Figure
@@ -24,9 +24,7 @@ class SaveSpec:
     """Formats and resolutions for one figure export."""
 
     formats: tuple[str, ...] = ("pdf", "png")
-    dpi: Mapping[str, int] = field(
-        default_factory=lambda: {"pdf": 300, "png": 200}
-    )
+    dpi: Mapping[str, int] = field(default_factory=lambda: {"pdf": 300, "png": 200})
     bbox_inches: str | None = "tight"
     close: bool = False
     transparent: bool = False
@@ -65,7 +63,7 @@ def save_figure(
     written: list[Path] = []
     for fmt in spec.formats:
         path = outdir / f"{name}.{fmt}"
-        kwargs: dict = {
+        kwargs: dict[str, Any] = {
             "dpi": spec.dpi_for(fmt),
             "bbox_inches": spec.bbox_inches,
             "transparent": spec.transparent,
@@ -82,7 +80,7 @@ def save_figure(
     return written
 
 
-def _format_metadata(fmt: str, metadata: Mapping[str, str]) -> dict:
+def _format_metadata(fmt: str, metadata: Mapping[str, str]) -> dict[str, str]:
     """Map free-form provenance onto the keys each backend accepts.
 
     The PDF and PNG backends take different key sets and raise on unknown ones, so a

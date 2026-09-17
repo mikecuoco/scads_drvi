@@ -24,6 +24,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
+import numpy.typing as npt
 
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
@@ -41,7 +42,7 @@ __all__ = [
 Tail = Literal["upper", "lower"]
 
 
-def p_one_tailed(z, *, tail: Tail = "upper") -> np.ndarray:
+def p_one_tailed(z: npt.ArrayLike, *, tail: Tail = "upper") -> np.ndarray:
     """One-tailed p-value for a z-score.
 
     ``upper`` is the default because an S-LDSC coefficient z-score is tested against the
@@ -58,7 +59,7 @@ def p_one_tailed(z, *, tail: Tail = "upper") -> np.ndarray:
     raise ValueError(f"tail must be 'upper' or 'lower', got {tail!r}")
 
 
-def bh_qvalues(p, n: int | None = None) -> np.ndarray:
+def bh_qvalues(p: npt.ArrayLike, n: int | None = None) -> np.ndarray:
     """Benjamini-Hochberg q-values. Equivalent to R's ``p.adjust(p, "BH", n=n)``.
 
     `n` is the multiplicity denominator, defaulting to the number of finite p-values.
@@ -81,9 +82,7 @@ def bh_qvalues(p, n: int | None = None) -> np.ndarray:
 
     denominator = m if n is None else int(n)
     if denominator < m:
-        raise ValueError(
-            f"n={denominator} is smaller than the {m} finite p-values being corrected"
-        )
+        raise ValueError(f"n={denominator} is smaller than the {m} finite p-values being corrected")
 
     values = p[finite]
     order = np.argsort(values, kind="stable")
@@ -100,7 +99,7 @@ def bh_qvalues(p, n: int | None = None) -> np.ndarray:
     return q
 
 
-def legacy_bh_qvalues(p) -> np.ndarray:
+def legacy_bh_qvalues(p: npt.ArrayLike) -> np.ndarray:
     """The interpretation notebooks' BH arithmetic, reproduced exactly.
 
     Kept only so :func:`compare_bh` can quantify what changes. Do not use it: the
@@ -118,7 +117,7 @@ def legacy_bh_qvalues(p) -> np.ndarray:
     return np.clip(p * m / ranks, 0.0, 1.0)
 
 
-def compare_bh(p, n: int | None = None) -> pd.DataFrame:
+def compare_bh(p: npt.ArrayLike, n: int | None = None) -> pd.DataFrame:
     """Correct vs legacy q-values side by side, with the significance flips called out.
 
     Columns: ``p``, ``q_correct``, ``q_legacy``, ``delta``, and ``flips_at_05``. The last
@@ -142,7 +141,7 @@ def compare_bh(p, n: int | None = None) -> pd.DataFrame:
 
 
 def bh_threshold_z(
-    q, z, *, alpha: float = 0.05, tail: Tail = "upper"
+    q: npt.ArrayLike, z: npt.ArrayLike, *, alpha: float = 0.05, tail: Tail = "upper"
 ) -> float | None:
     """The least extreme z still passing BH at `alpha`, or None if nothing passes.
 
@@ -191,9 +190,7 @@ def add_fdr(
     import pandas as pd
 
     if z_col not in frame.columns:
-        raise KeyError(
-            f"{z_col!r} not in frame; columns are {list(frame.columns)}"
-        )
+        raise KeyError(f"{z_col!r} not in frame; columns are {list(frame.columns)}")
 
     out = frame.copy()
     out[p_col] = p_one_tailed(out[z_col].to_numpy(), tail=tail)
@@ -214,9 +211,7 @@ def add_fdr(
     return out
 
 
-def significant(
-    frame: pd.DataFrame, *, alpha: float = 0.05, q_col: str = "fdr_q"
-) -> pd.Series:
+def significant(frame: pd.DataFrame, *, alpha: float = 0.05, q_col: str = "fdr_q") -> pd.Series:
     """Boolean mask at a stated alpha, so no caller re-types ``q < 0.05``."""
     if q_col not in frame.columns:
         raise KeyError(f"{q_col!r} not in frame; run add_fdr first")

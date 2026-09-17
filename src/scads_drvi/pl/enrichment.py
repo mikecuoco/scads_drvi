@@ -22,6 +22,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
+    from scads_drvi.pl.color import SignificanceRamp
     from scads_drvi.pl.frugal import BoxStats
 
 __all__ = [
@@ -37,9 +38,7 @@ Z_COLUMN = "Coefficient_z-score"
 _SUFFIX = {"pos": "+", "neg": "-", "combined": ""}
 
 
-def _labelled(
-    results: pd.DataFrame, titles: Mapping[str, str] | None = None
-) -> list[str]:
+def _labelled(results: pd.DataFrame, titles: Mapping[str, str] | None = None) -> list[str]:
     """A reader-facing name per row: ``dim`` (or its display title, from `titles`, when
     given -- e.g. DRVI's own ``"DR 1"``) plus a ``+``/``-`` suffix when the row carries
     a ``direction``, without ever materializing a ``dim_47/pos``-shaped column name.
@@ -58,7 +57,7 @@ def heritability_landscape(
     *,
     trait: str | None = None,
     top_n: int = 4,
-    ramp=None,
+    ramp: SignificanceRamp | None = None,
     q_column: str = "fdr_q",
     z_column: str = Z_COLUMN,
     alpha: float = 0.05,
@@ -118,8 +117,12 @@ def heritability_landscape(
     )
     for slot in range(min(top_n, len(z))):
         bars.annotate(
-            names[slot], (positions[slot], z[slot]),
-            textcoords="offset points", xytext=(0, 3), ha="center", fontsize=7,
+            names[slot],
+            (positions[slot], z[slot]),
+            textcoords="offset points",
+            xytext=(0, 3),
+            ha="center",
+            fontsize=7,
         )
 
     with np.errstate(divide="ignore"):
@@ -127,17 +130,16 @@ def heritability_landscape(
     volcano.scatter(z, neglog, c=colors, s=14, linewidths=0)
     volcano.set_xlabel("coefficient z")
     volcano.set_ylabel(f"-log10({ramp.label})")
-    volcano.axhline(
-        -np.log10(ramp.thresholds[0]), color="#949494", linestyle=":", linewidth=0.8
-    )
+    volcano.axhline(-np.log10(ramp.thresholds[0]), color="#949494", linestyle=":", linewidth=0.8)
     for slot in range(min(top_n, len(z))):
         volcano.annotate(
-            names[slot], (z[slot], neglog[slot]),
-            textcoords="offset points", xytext=(3, 3), fontsize=7,
+            names[slot],
+            (z[slot], neglog[slot]),
+            textcoords="offset points",
+            xytext=(3, 3),
+            fontsize=7,
         )
-    volcano.legend(
-        handles=significance_handles(ramp), frameon=False, fontsize=7, loc="upper left"
-    )
+    volcano.legend(handles=significance_handles(ramp), frameon=False, fontsize=7, loc="upper left")
 
     if trait is not None:
         fig.suptitle(trait)
@@ -180,9 +182,7 @@ def trait_concordance(
     left, right = wide[traits[0]].to_numpy(), wide[traits[1]].to_numpy()
     titled = (lambda dim: titles.get(dim, dim)) if titles is not None else (lambda dim: dim)
     if isinstance(index, list):
-        names = [
-            f"{titled(dim)}{_SUFFIX.get(direction, '')}" for dim, direction in wide.index
-        ]
+        names = [f"{titled(dim)}{_SUFFIX.get(direction, '')}" for dim, direction in wide.index]
     else:
         names = [titled(str(dim)) for dim in wide.index]
 
@@ -195,8 +195,11 @@ def trait_concordance(
     scatter.set_ylabel(f"z ({traits[1]})")
     for slot in np.argsort(-left)[:top_n]:
         scatter.annotate(
-            names[slot], (left[slot], right[slot]),
-            textcoords="offset points", xytext=(3, 3), fontsize=7,
+            names[slot],
+            (left[slot], right[slot]),
+            textcoords="offset points",
+            xytext=(3, 3),
+            fontsize=7,
         )
 
     delta = right - left
@@ -296,9 +299,7 @@ def score_by_group(
     if top_n is not None:
         ordered = ordered.select(list(ordered.labels)[:top_n])
 
-    palette = categorical_palette(
-        ordered.labels, highlight=list(highlight) or None
-    )
+    palette = categorical_palette(ordered.labels, highlight=list(highlight) or None)
     colors = [palette[label] for label in ordered.labels]
 
     width = max(4.0, 0.32 * len(ordered))
@@ -335,9 +336,7 @@ def grouped_landscape(
     from scads_drvi.pl.color import robust_norm
 
     if means.shape != counts.shape:
-        raise ValueError(
-            f"means {means.shape} and counts {counts.shape} must have the same shape"
-        )
+        raise ValueError(f"means {means.shape} and counts {counts.shape} must have the same shape")
 
     palette = colormaps[cmap].with_extremes(bad=masked_color)
     norm = robust_norm(means.to_numpy(dtype=float), percentiles=(0.0, 99.0), gamma=gamma)
@@ -351,7 +350,10 @@ def grouped_landscape(
 
     image = ax.imshow(
         np.ma.masked_invalid(means.to_numpy(dtype=float)),
-        aspect="auto", cmap=palette, norm=norm, zorder=2,
+        aspect="auto",
+        cmap=palette,
+        norm=norm,
+        zorder=2,
     )
     ax.set_xticks(np.arange(means.shape[1]))
     ax.set_xticklabels(means.columns.astype(str), rotation=90, fontsize=7)
@@ -362,8 +364,12 @@ def grouped_landscape(
 
     for name, start, stop in blocks:
         ax.text(
-            means.shape[1] - 0.4, (start + stop - 1) / 2.0, name,
-            va="center", ha="left", fontsize=7,
+            means.shape[1] - 0.4,
+            (start + stop - 1) / 2.0,
+            name,
+            va="center",
+            ha="left",
+            fontsize=7,
         )
 
     bar = fig.colorbar(image, ax=ax, pad=0.02, fraction=0.03)

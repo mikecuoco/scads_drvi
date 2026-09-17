@@ -14,11 +14,12 @@ Two conventions worth stating, because they are choices and not defaults:
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Hashable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
+import numpy.typing as npt
 
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
@@ -53,12 +54,8 @@ class GroupStats:
         from dataclasses import replace
 
         if column not in self.frame.columns:
-            raise KeyError(
-                f"{column!r} not in the summary; columns are {list(self.frame.columns)}"
-            )
-        return replace(
-            self, frame=self.frame.sort_values(column, ascending=ascending)
-        )
+            raise KeyError(f"{column!r} not in the summary; columns are {list(self.frame.columns)}")
+        return replace(self, frame=self.frame.sort_values(column, ascending=ascending))
 
 
 def summarize_by(
@@ -85,7 +82,7 @@ def summarize_by(
     if not 0 < ci < 1:
         raise ValueError(f"ci must be in (0, 1), got {ci}")
 
-    name = values.name or "value"
+    name: str = str(values.name) if values.name else "value"
     joined = cells[keys].join(values.rename(name), how="inner")
     if joined.empty:
         raise ValueError(
@@ -94,9 +91,7 @@ def summarize_by(
         )
 
     grouped = joined.groupby(keys, dropna=False, observed=True)[name]
-    summary = grouped.agg(
-        n="size", n_scored="count", mean="mean", median="median", std="std"
-    )
+    summary = grouped.agg(n="size", n_scored="count", mean="mean", median="median", std="std")
     for q in quantiles:
         summary[f"q{q:g}"] = grouped.quantile(q / 100.0 if q > 1 else q)
 
@@ -144,7 +139,7 @@ def group_matrix(
         if column not in cells.columns:
             raise KeyError(f"{column!r} not in the cell table")
 
-    name = values.name or "value"
+    name: str = str(values.name) if values.name else "value"
     joined = cells[[index, columns]].join(values.rename(name), how="inner")
     if joined.empty:
         raise ValueError("the values and the cell table share no cells")
@@ -152,9 +147,14 @@ def group_matrix(
     means = joined.pivot_table(
         index=index, columns=columns, values=name, aggfunc="mean", observed=True
     )
-    counts = joined.pivot_table(
-        index=index, columns=columns, values=name, aggfunc="count", observed=True
-    ).reindex(index=means.index, columns=means.columns).fillna(0).astype(int)
+    counts = (
+        joined.pivot_table(
+            index=index, columns=columns, values=name, aggfunc="count", observed=True
+        )
+        .reindex(index=means.index, columns=means.columns)
+        .fillna(0)
+        .astype(int)
+    )
 
     means = means.mask(counts < int(min_cells))
 
@@ -191,8 +191,7 @@ def block_order(
     frame = stats.frame if isinstance(stats, GroupStats) else stats
     for column in (group, block, value):
         if column not in frame.columns:
-            raise KeyError(f"{column!r} not in the summary; columns are "
-                           f"{list(frame.columns)}")
+            raise KeyError(f"{column!r} not in the summary; columns are {list(frame.columns)}")
 
     ordered = frame.sort_values([block, value], ascending=[True, ascending])
     names = ordered[group].astype(str).tolist()
@@ -203,9 +202,7 @@ def block_order(
     # `viz.enrichment.grouped_landscape` does, mislabelled the axis from that row onwards.
     spans: list[tuple[str, int, int]] = []
     start = 0
-    for block_name, chunk in ordered.groupby(
-        block, sort=True, observed=True, dropna=False
-    ):
+    for block_name, chunk in ordered.groupby(block, sort=True, observed=True, dropna=False):
         stop = start + len(chunk)
         spans.append((str(block_name), start, stop))
         start = stop
@@ -221,11 +218,11 @@ def block_order(
 
 def profile_by_group(
     matrix: pd.DataFrame,
-    labels: Iterable,
+    labels: Iterable[Hashable],
     *,
     min_cells: int = 1,
     zscore: bool = True,
-) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[Hashable, int]]:
     """Mean of each column per group, and its z within each column.
 
     Returns ``(means, z, counts)``. The z is taken **within a column**, i.e. across
@@ -257,7 +254,7 @@ def profile_by_group(
     return means, z, counts.to_dict()
 
 
-def eta_squared(values, groups) -> float:
+def eta_squared(values: npt.ArrayLike, groups: npt.ArrayLike) -> float:
     """One-way ANOVA eta-squared: the fraction of variance explained by a grouping.
 
     The categorical analogue of r-squared, for asking how much of a score is accounted
@@ -267,8 +264,7 @@ def eta_squared(values, groups) -> float:
     groups = np.asarray(groups)
     if values.shape != groups.shape:
         raise ValueError(
-            f"values and groups must have the same shape, got {values.shape} "
-            f"and {groups.shape}"
+            f"values and groups must have the same shape, got {values.shape} and {groups.shape}"
         )
     finite = np.isfinite(values)
     values, groups = values[finite], groups[finite]
@@ -302,9 +298,7 @@ def streaming_correlation(chunks: Iterable[np.ndarray], n_columns: int) -> np.nd
     for chunk in chunks:
         block = np.asarray(chunk, dtype=np.float64)
         if block.ndim != 2 or block.shape[1] != k:
-            raise ValueError(
-                f"each chunk must be (rows, {k}); got {getattr(block, 'shape', None)}"
-            )
+            raise ValueError(f"each chunk must be (rows, {k}); got {getattr(block, 'shape', None)}")
         total += block.sum(axis=0)
         gram += block.T @ block
         n += block.shape[0]
@@ -317,4 +311,5 @@ def streaming_correlation(chunks: Iterable[np.ndarray], n_columns: int) -> np.nd
     spread = np.sqrt(np.diag(covariance))
     with np.errstate(invalid="ignore", divide="ignore"):
         correlation = covariance / np.outer(spread, spread)
-    return np.clip(correlation, -1.0, 1.0)
+    clipped: np.ndarray = np.clip(correlation, -1.0, 1.0)
+    return clipped

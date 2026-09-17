@@ -45,7 +45,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
@@ -76,9 +76,7 @@ def read_bim(path: str | Path) -> pd.DataFrame:
     """
     import pandas as pd
 
-    frame = pd.read_csv(
-        path, sep=r"\s+", header=None, names=list(BIM_COLUMNS), dtype={"SNP": str}
-    )
+    frame = pd.read_csv(path, sep=r"\s+", header=None, names=list(BIM_COLUMNS), dtype={"SNP": str})
     if frame.empty:
         raise ValueError(f"{path} has no variants")
     return frame
@@ -115,15 +113,11 @@ def to_full_annot(thin: pd.DataFrame, bim: pd.DataFrame) -> pd.DataFrame:
             "restrict the annotation to the SNPs the LD scores are printed over."
         )
 
-    identifiers = pd.DataFrame(
-        {name: bim[name].to_numpy() for name in IDENTIFIER_COLUMNS}
-    )
+    identifiers = pd.DataFrame({name: bim[name].to_numpy() for name in IDENTIFIER_COLUMNS})
     return pd.concat([identifiers, thin.reset_index(drop=True)], axis=1)
 
 
-def force_decimal(
-    frame: pd.DataFrame, columns: Sequence[str] | None = None
-) -> pd.DataFrame:
+def force_decimal(frame: pd.DataFrame, columns: Sequence[str] | None = None) -> pd.DataFrame:
     """Return a copy whose numeric `columns` are typed float rather than integer.
 
     Works around a reader that infers a column's type from a leading sample and then
@@ -173,6 +167,6 @@ def write_full_annot(
 
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    compression = "gzip" if dest.suffix == ".gz" else None
+    compression: Literal["gzip"] | None = "gzip" if dest.suffix == ".gz" else None
     full.to_csv(dest, sep="\t", index=False, compression=compression)
     return dest
