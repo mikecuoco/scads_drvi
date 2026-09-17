@@ -13,6 +13,14 @@ scads\_drvi.enrich
    :members:
    :show-inheritance:
 
+.. automodule:: scads_drvi.enrich.sweep
+   :members:
+   :show-inheritance:
+
+.. automodule:: scads_drvi.enrich.reference
+   :members:
+   :show-inheritance:
+
 .. automodule:: scads_drvi.enrich.h2_output
    :members:
    :show-inheritance:

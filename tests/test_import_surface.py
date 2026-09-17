@@ -41,6 +41,8 @@ CORE_MODULES = [
     "scads_drvi.enrich.annotations",
     "scads_drvi.enrich.binary",
     "scads_drvi.enrich.run",
+    "scads_drvi.enrich.sweep",
+    "scads_drvi.enrich.reference",
     "scads_drvi.annotate.gc",
     "scads_drvi.annotate.motif",
     "scads_drvi.annotate.resources",

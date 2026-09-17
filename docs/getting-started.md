@@ -176,6 +176,43 @@ arm = embed.uns["enrich"]["my_arm"]
 arm["results"].query("direction == 'pos' and trait == 'trait_a'")
 ```
 
+### The real sweep: `EnrichmentSweep`
+
+The manual loop above is a single-chromosome toy example. A real run sweeps every
+kept factor, both loading directions, and every chromosome — hours, not seconds.
+`EnrichmentSweep` does that whole loop (factor selection, per-chromosome `l2`, `h2`
+against a baseline reference, and `read_results`) from just `embed` (an h5ad path by
+default), a reference panel, and sumstats. Peak-to-SNP annotation building is still
+yours — this package has never owned that overlap, only what's downstream of it:
+
+```python
+from scads_drvi.enrich.sweep import EnrichmentSweep
+
+def annotate(dim, direction, chrom, bim):
+    ...  # your own peak -> per-SNP overlap for this (dim, direction, chromosome)
+    return hit  # 1-D array-like, len(bim), in bim's row order
+
+sweep = EnrichmentSweep.ensure(
+    embed="my_fit_cells.h5ad",                       # loaded once, exposed as sweep.adata
+    bfile_chr=f"{REF}/plink_files/1000G.EUR.hg38.{{chrom}}",
+    w_ld_chr=f"{REF}/weights/weights.hm3_noMHC.",
+    frqfile_chr=f"{REF}/plink_files/1000G.EUR.hg38.",
+    sumstats={"trait_a": "trait_a.sumstats.gz", "trait_b": "trait_b.sumstats.gz"},
+    annotate=annotate,
+)
+# ref_ld_chr_extra defaults to the baseline-LF v2.2 UK Biobank reference (in-sample
+# LD, preferred over 1000G for a UKB-scale GWAS) -- downloaded once (~11 GB) and
+# cached; point $SCADS_DRVI_CACHE at scratch storage first. Pass
+# ref_ld_chr_extra=() for no baseline categories, or your own stem(s) instead.
+
+results = sweep.run()   # run_l2() -> run_h2() -> read_results(), each independently
+                         # resumable (skips work whose output already exists)
+sweep.adata.uns.setdefault("enrich", {})["my_arm"] = {
+    "results": results, "factor_selection": sweep.fmap.drop(columns="annot_index")
+}
+sweep.adata.write_h5ad("my_fit_cells.h5ad")
+```
+
 ## Annotating peaks (motif enrichment)
 
 Independent of the LDSC path, and works on **peaks**, not cells: it reads back the
