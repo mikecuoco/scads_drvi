@@ -9,6 +9,10 @@ scads\_drvi.enrich
    :members:
    :show-inheritance:
 
+.. automodule:: scads_drvi.enrich.run
+   :members:
+   :show-inheritance:
+
 .. automodule:: scads_drvi.enrich.h2_output
    :members:
    :show-inheritance:

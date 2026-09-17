@@ -136,8 +136,8 @@ tolerated):
 
 ```python
 from scads_drvi.enrich.annotations import read_bim, write_full_annot
-from scads_drvi.enrich.binary import ensure_ldsc, run_ldsc
 from scads_drvi.enrich.config import kept_dims, latent_stats_from_embed, select_factors
+from scads_drvi.enrich.run import LdscRun
 
 stats = latent_stats_from_embed(embed)
 fmap = select_factors(stats, list(embed.var_names))
@@ -150,13 +150,12 @@ for annot, dim in annot2dim.items():
     thin = ...  # peaks -> per-SNP annotation for `dim`, one 0/1+ column, in bim order
     write_full_annot(f"annot/{annot}.1.annot.gz", thin, bim)
 
-ldsc = ensure_ldsc()   # resolves/downloads/checksum-verifies the pinned v0.5.0 binary
+# resolves/downloads/checksum-verifies the pinned v0.5.0 binary; bfile/w_ld_chr/
+# overlap_annot are set once and reused by every l2/h2 call below
+run = LdscRun.ensure(bfile="1000G.EUR.QC.1", w_ld_chr="weights.", overlap_annot=True)
 for annot in annot2dim:
-    run_ldsc("l2", {"bfile": "1000G.EUR.QC.1", "annot": f"annot/{annot}.1.annot.gz",
-                     "ld_wind_cm": 1, "out": f"ld/{annot}.1"}, binary=ldsc)
-    run_ldsc("h2", {"h2": "trait_a.sumstats.gz", "ref_ld_chr": f"ld/{annot}.",
-                     "w_ld_chr": "weights.", "overlap_annot": True,
-                     "out": f"results/trait_a/{annot}"}, binary=ldsc)
+    run.l2(f"annot/{annot}.1.annot.gz", f"ld/{annot}.1")
+    run.h2("trait_a.sumstats.gz", f"ld/{annot}.", f"results/trait_a/{annot}")
 ```
 
 Reading the results back attaches one tidy table, keyed by `dim` and `direction`, into
@@ -164,9 +163,7 @@ the same h5ad (there is no persisted `dim_j/pos`/`dim_j/neg` split; a directiona
 loadings view is derived on demand, see below):
 
 ```python
-from scads_drvi.enrich.ldsc import read_results
-
-results = read_results(results_root, traits=("trait_a", "trait_b"), annot2dim=annot2dim)
+results = run.read_results(results_root, traits=("trait_a", "trait_b"), annot2dim=annot2dim)
 embed.uns.setdefault("enrich", {})["my_arm"] = {
     "results": results,
     "factor_selection": fmap.drop(columns="annot_index"),
