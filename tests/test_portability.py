@@ -27,11 +27,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 
-from scads_drvi.enrich.config import (  # noqa: E402
-    kept_dims,
-    latent_stats_from_embed,
-    select_factors,
-)
+from scads_drvi.enrich.config import kept_dims, select_factors  # noqa: E402
 from scads_drvi.enrich.ldsc import read_results  # noqa: E402
 from scads_drvi.pl.enrichment import (  # noqa: E402
     covariate_audit,
@@ -168,8 +164,7 @@ def analysis(tmp_path_factory):
 
     # -- factor selection, exactly the way the real enrichment stage would ------------
     embed = ad.read_h5ad(path)
-    stats = latent_stats_from_embed(embed)
-    fmap = select_factors(stats, list(embed.var_names))
+    fmap = select_factors(embed.var, list(embed.var_names))
     keep = kept_dims(fmap)
     assert len(keep) == N_KEPT
     annot2dim = {f"k{i + 1}": dim for i, dim in enumerate(keep)}
