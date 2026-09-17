@@ -81,10 +81,10 @@ class EnrichmentSweep:
     """
 
     ldsc_run: LdscRun
-    embed: "str | Path | AnnData"
+    embed: str | Path | AnnData
     bfile_chr: str
     sumstats: Mapping[str, str | Path]
-    annotate: Callable[[str, str, int, "pd.DataFrame"], Any]
+    annotate: Callable[[str, str, int, pd.DataFrame], Any]
     chroms: Sequence[int] = tuple(range(1, 23))
     ref_ld_chr_extra: Sequence[str | Path] = ()
     frqfile_chr: str | Path | None = None
@@ -239,7 +239,7 @@ class EnrichmentSweep:
 
     def read_results(
         self, *, traits: Iterable[str] | None = None, **kwargs
-    ) -> "pd.DataFrame":
+    ) -> pd.DataFrame:
         """:meth:`~scads_drvi.enrich.run.LdscRun.read_results` for this sweep's
         `annot2dim`/`direction_map`."""
         return self.ldsc_run.read_results(
@@ -250,7 +250,7 @@ class EnrichmentSweep:
             **kwargs,
         )
 
-    def run(self, *, force: bool = False, **read_kwargs) -> "pd.DataFrame":
+    def run(self, *, force: bool = False, **read_kwargs) -> pd.DataFrame:
         """``run_l2()`` then ``run_h2()`` then ``read_results()``."""
         self.run_l2(force=force)
         self.run_h2(force=force)
@@ -263,7 +263,7 @@ class EnrichmentSweep:
         embed,
         bfile_chr: str,
         sumstats: Mapping[str, str | Path],
-        annotate: Callable[[str, str, int, "pd.DataFrame"], object],
+        annotate: Callable[[str, str, int, pd.DataFrame], object],
         w_ld_chr: str | Path,
         chroms: Sequence[int] = tuple(range(1, 23)),
         ref_ld_chr_extra: Sequence[str | Path] | object = _UNSET,
@@ -287,7 +287,7 @@ class EnrichmentSweep:
         reference_cache: str | Path | None = None,
         allow_reference_download: bool = True,
         **ldsc_kwargs,
-    ) -> "EnrichmentSweep":
+    ) -> EnrichmentSweep:
         """:meth:`~scads_drvi.enrich.run.LdscRun.ensure` then wrap it -- the common case.
 
         `bfile` is deliberately left unset on the underlying :class:`LdscRun`: the

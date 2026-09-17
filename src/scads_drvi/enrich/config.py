@@ -24,7 +24,6 @@ import pandas as pd
 # `log` is re-exported: enrichment scripts import it here.
 from scads_drvi._util.progress import log_out as log  # noqa: F401  (re-exported)
 
-
 # ---------------------------------------------------------------------------
 # Factor selection (stage 1a)
 # ---------------------------------------------------------------------------
