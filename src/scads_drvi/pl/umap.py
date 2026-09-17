@@ -137,6 +137,7 @@ def latent_umap_grid(
     """
     import anndata as ad
     import scanpy as sc
+    from matplotlib.ticker import FuncFormatter
 
     from scads_drvi.pl.color import SATURATED_RED_BLUE_CMAP, SATURATED_SKY_CMAP
 
@@ -178,9 +179,14 @@ def latent_umap_grid(
         neg.var[title_col] = neg.var[title_col].astype(str) + "-"
         pos.var[order_col] = pos.var[order_col] + 1e-8
         neg.var[order_col] = neg.var[order_col] - 1e-8
+        # dim_0..dim_{K-1} would otherwise appear twice (once negated) going into the
+        # concat below -- rename to unique ids first so ad.concat doesn't warn about
+        # duplicate var_names for the moment before the final reset below.
+        pos.var_names = [f"{i}_pos" for i in pos.var_names]
+        neg.var_names = [f"{i}_neg" for i in neg.var_names]
         plotted = ad.concat([pos, neg], axis=1, join="inner", merge="first")
-        # dim_0..dim_{K-1} now appears twice (once negated) -- var_names must be
-        # unique for scanpy's gene_symbols= lookup below to resolve one row per title.
+        # A plain 0..n_vars-1 index -- scanpy's gene_symbols= lookup below only needs
+        # one row per title, not any particular naming.
         plotted.var_names = [str(i) for i in range(plotted.n_vars)]
 
     # `.var`'s own row order need not match -- color=cols_to_show below is an
@@ -208,10 +214,19 @@ def latent_umap_grid(
         )
         if directional and tmp_df["_direction"].iloc[i] == "-":
             ax.invert_yaxis()
-            labels = -ax.get_yticks()
-            if all(x == int(x) for x in labels):
-                labels = [int(x) for x in labels]
-            ax.set_yticklabels(labels)
+
+            # A formatter, not set_ticks()/set_yticklabels() on ax.get_yticks() --
+            # this colorbar axis isn't autoscaled yet at this point, so freezing its
+            # current (pre-autoscale) ticks produces a degenerate axis transform at
+            # draw time. A formatter defers both the "all ticks are whole numbers"
+            # check and the negation to draw time instead, once ticks are final.
+            def _negate_ticklabel(x, _pos, ax=ax):
+                ticks = ax.get_yticks()
+                if all(float(t).is_integer() for t in ticks):
+                    return str(int(-x))
+                return f"{-x:g}"
+
+            ax.yaxis.set_major_formatter(FuncFormatter(_negate_ticklabel))
     if rearrange_titles:
         for ax in fig.axes:
             ax.text(
