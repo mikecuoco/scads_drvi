@@ -48,13 +48,16 @@ def run(tmp_path):
 
 class TestL2:
     def test_uses_instance_defaults(self, run):
+        """sketch=5000 and snp_level_masking=True are on by default, for speed;
+        python_compat defaults off since the binary refuses it together with
+        snp-level masking."""
         seen = []
         run.log_fn = seen.append
         run.l2("annot/k1.1.annot.gz", "ld/k1.1")
         (argv,) = seen
         assert argv == (
-            "$ ldsc l2 --python-compat --bfile 1000G.EUR.QC.1 "
-            "--annot annot/k1.1.annot.gz --ld-wind-cm 1 --out ld/k1.1"
+            "$ ldsc l2 --bfile 1000G.EUR.QC.1 --annot annot/k1.1.annot.gz "
+            "--ld-wind-cm 1 --sketch 5000 --snp-level-masking --out ld/k1.1"
         )
 
     def test_bfile_override_wins(self, run):
@@ -74,6 +77,43 @@ class TestL2:
         run.log_fn = seen.append
         run.l2("annot/k1.1.annot.gz", "ld/k1.1", print_snps="w_hm3.snplist")
         assert "--print-snps w_hm3.snplist" in seen[0]
+
+    def test_sketch_can_be_turned_off_per_call(self, run):
+        seen = []
+        run.log_fn = seen.append
+        run.l2("annot/k1.1.annot.gz", "ld/k1.1", sketch=None, snp_level_masking=False)
+        argv = seen[0]
+        assert "--sketch" not in argv
+        assert "--snp-level-masking" not in argv
+
+    def test_sketch_can_be_overridden_per_call(self, run):
+        seen = []
+        run.log_fn = seen.append
+        run.l2("annot/k1.1.annot.gz", "ld/k1.1", sketch=200)
+        assert "--sketch 200" in seen[0]
+
+    def test_python_compat_and_snp_level_masking_together_is_refused(self, run):
+        with pytest.raises(ValueError, match="cannot both be on"):
+            run.l2("annot/k1.1.annot.gz", "ld/k1.1", python_compat=True)
+
+    def test_python_compat_works_once_snp_level_masking_is_off(self, run):
+        seen = []
+        run.log_fn = seen.append
+        run.l2(
+            "annot/k1.1.annot.gz",
+            "ld/k1.1",
+            python_compat=True,
+            snp_level_masking=False,
+            sketch=None,
+        )
+        assert "--python-compat" in seen[0]
+
+    def test_sketch_requires_allow_approximate_is_derived_not_forgotten(self, run):
+        """sketch is one of binary.APPROXIMATE_FLAGS, normally gated behind
+        allow_approximate=True on run_ldsc -- l2() must derive that gate from `sketch`
+        being set rather than needing a separate switch, or the default above would
+        raise instead of running."""
+        run.l2("annot/k1.1.annot.gz", "ld/k1.1")  # would raise ValueError if ungated
 
 
 class TestH2:
