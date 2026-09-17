@@ -122,10 +122,16 @@ class TestRunL2:
         sweep.run_l2(dims=["dim_0"], directions=["pos"], chroms=[1], force=True)
         assert len(seen) == 1
 
-    def test_annotation_files_never_persist(self, sweep, tmp_path):
+    def test_annotation_files_persist_at_ldscore_prefix(self, sweep):
+        # h2 --overlap-annot reads the .annot file back from --ref-ld-chr's own
+        # prefix to compute each category's Prop._SNPs -- confirmed against the real
+        # binary, which errors ("No .annot files found for prefix ...") if it's gone
+        # by the time run_h2() runs. A temp dir that's cleaned up after run_l2()
+        # returns silently produces that failure later, so this must be the same
+        # prefix as the .l2.ldscore.gz output, not ephemeral.
         sweep.run_l2(dims=["dim_0"], directions=["pos"], chroms=[1])
-        leftovers = list(Path(tmp_path).rglob("*.annot.gz"))
-        assert leftovers == []
+        out = sweep._ld_out("dim_0_pos", 1)
+        assert Path(f"{out}.annot.gz").exists()
 
 
 class TestRunH2:
