@@ -302,10 +302,14 @@ def read_score_db_regions(db_path: str | Path, motif_id_column: str = "motifs") 
 
 def read_score_db_motif_ids(db_path: str | Path, motif_id_column: str = "motifs") -> list:
     """The motif-id column of a region x motif score database, in row order."""
-    import pyarrow.feather as pf
+    import pyarrow.dataset as ds
 
-    names = read_score_db_regions(db_path, motif_id_column)
-    return pf.read_table(db_path, columns=[len(names)]).column(0).to_pylist()
+    return (
+        ds.dataset(db_path, format="feather")
+        .to_table(columns=[motif_id_column])
+        .column(0)
+        .to_pylist()
+    )
 
 
 def stream_accumulate(
@@ -333,7 +337,10 @@ def stream_accumulate(
     each slab: a slab/row misalignment would otherwise be silent -- the scores would
     simply belong to the wrong regions.
     """
-    import pyarrow.feather as pf
+    import pyarrow.dataset as ds
+
+    dataset = ds.dataset(db_path, format="feather")
+    schema_names = dataset.schema.names
 
     K = Wr.shape[0]
     B = np.zeros((len(strata_ix), n_strata), dtype=np.float32)
@@ -348,8 +355,7 @@ def stream_accumulate(
         if i1 <= i0:
             continue
         sel = used_cols[i0:i1]
-        tbl = pf.read_table(db_path, columns=list(range(lo, hi)),
-                            memory_map=False, use_threads=True)
+        tbl = dataset.to_table(columns=schema_names[lo:hi], use_threads=True)
         names = tbl.column_names
         X = np.empty((tbl.num_rows, len(sel)), dtype=np.float32)   # (M, n_sel)
         for j, c in enumerate(sel):

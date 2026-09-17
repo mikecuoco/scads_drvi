@@ -106,14 +106,15 @@ def _write_synthetic_score_db(path: Path, region_names: list[str], motif_ids: li
     """A small region x motif score Feather file, shaped like the real cisTarget-style
     databases `stream_accumulate` reads: N region columns + a trailing `motifs` column."""
     import pyarrow as pa
-    import pyarrow.feather as pf
 
     R, M = len(region_names), len(motif_ids)
     scores = rng.lognormal(0, 1, size=(M, R)).astype("float32")
     scores[rng.random((M, R)) < 0.5] = 0.0  # zero-inflated, like the real thing
     columns = {name: scores[:, j] for j, name in enumerate(region_names)}
     columns["motifs"] = motif_ids
-    pf.write_feather(pa.table(columns), path)
+    table = pa.table(columns)
+    with pa.ipc.new_file(path, table.schema) as writer:
+        writer.write_table(table)
 
 
 @pytest.mark.data

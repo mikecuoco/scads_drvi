@@ -575,6 +575,11 @@ def latent_heatmap(
         if directional
         else {"cmap": cmap, "vcenter": 0}
     )
+    # Whichever slice above (remove_vanished/make_balanced) ran last may still leave
+    # embed a view -- sc.pl.heatmap below mutates it in place (sanitizing `.obs`,
+    # then assigning a `.uns` colors key), which warns unless it's an actual AnnData.
+    if embed.is_view:
+        embed = embed.copy()
     axes = sc.pl.heatmap(
         embed, vars_to_show, categorical_column, gene_symbols=title_col,
         figsize=call_figsize, show_gene_labels=True, show=False,
