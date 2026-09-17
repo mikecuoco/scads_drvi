@@ -37,7 +37,6 @@ CORE_MODULES = [
     "scads_drvi.scores.cell",
     "scads_drvi.scores.aggregate",
     "scads_drvi.enrich.ldsc",
-    "scads_drvi.enrich.h2_output",
     "scads_drvi.enrich.annotations",
     "scads_drvi.enrich.binary",
     "scads_drvi.enrich.run",
