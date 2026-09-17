@@ -32,10 +32,10 @@ import shutil
 import subprocess
 import tarfile
 import zipfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scads_drvi.enrich.binary import (
     LDSC_ENV_VAR,
@@ -51,11 +51,12 @@ from scads_drvi.enrich.binary import (
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
 
-__all__ = ["LdscRun"]
+__all__ = ["LdscRun", "LDSC_VERSION"]
 
 #: Sentinel distinguishing "use the instance default" from an explicit per-call value
-#: (including one that turns a default-on flag off, e.g. ``sketch=None``).
-_UNSET = object()
+#: (including one that turns a default-on flag off, e.g. ``sketch=None``). Typed `Any`
+#: so it can stand in as the default for whichever concrete parameter type it sentinels.
+_UNSET: Any = object()
 
 _RELEASE_URL = "https://github.com/sharifhsn/ldsc/releases/download/{version}/{asset}"
 
@@ -147,7 +148,7 @@ class LdscRun:
         cache: str | Path | None = None,
         allow_download: bool = True,
         check_version: bool = True,
-        **kwargs,
+        **kwargs: Any,
     ) -> LdscRun:
         """Resolve the ldsc binary, then wrap it -- the common case."""
         binary = cls._resolve_binary(
@@ -313,7 +314,7 @@ class LdscRun:
         *,
         python_compat: bool,
         allow_approximate: bool = False,
-    ) -> subprocess.CompletedProcess:
+    ) -> subprocess.CompletedProcess[str]:
         """Run one ldsc subcommand.
 
         `threads` caps the tool's own parallelism, which matters on a shared node: the
@@ -347,7 +348,7 @@ class LdscRun:
         sketch: int | None = _UNSET,
         snp_level_masking: bool = _UNSET,
         **extra: object,
-    ) -> subprocess.CompletedProcess:
+    ) -> subprocess.CompletedProcess[str]:
         """``ldsc l2`` for one annotation, using the instance's `bfile`/`ld_wind_cm`/
         `sketch`/`snp_level_masking`/`python_compat` unless overridden."""
         bfile = bfile if bfile is not None else self.bfile
@@ -390,7 +391,7 @@ class LdscRun:
         w_ld_chr: str | Path | None = None,
         overlap_annot: bool | None = None,
         **extra: object,
-    ) -> subprocess.CompletedProcess:
+    ) -> subprocess.CompletedProcess[str]:
         """``ldsc h2`` for one trait/annotation, using `self.w_ld_chr`/`self.overlap_annot`
         unless overridden. ``--python-compat`` is never passed: it is an ``l2``-only
         flag."""
@@ -412,9 +413,9 @@ class LdscRun:
         self,
         results_root: str | Path,
         *,
-        traits,
+        traits: Iterable[str],
         annot2dim: Mapping[str, str],
-        **kwargs,
+        **kwargs: Any,
     ) -> pd.DataFrame:
         """:func:`scads_drvi.enrich.ldsc.read_results` -- one import for the whole run."""
         from scads_drvi.enrich.ldsc import read_results
