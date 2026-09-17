@@ -267,6 +267,7 @@ class EnrichmentSweep:
         w_ld_chr: str | Path,
         chroms: Sequence[int] = tuple(range(1, 23)),
         ref_ld_chr_extra: Sequence[str | Path] | object = _UNSET,
+        sketch: int | None | object = _UNSET,
         frqfile_chr: str | Path | None = None,
         print_snps: str | Path | None = None,
         print_coefficients: bool = True,
@@ -302,7 +303,17 @@ class EnrichmentSweep:
         `ref_ld_chr_extra=()` explicitly to run with no baseline categories at all, or
         your own stem(s) (e.g. a 1000-Genomes-based ``baselineLD_v2.2``) to use a
         different reference instead.
+
+        `sketch` (the `l2` speed/accuracy knob -- see :class:`LdscRun`'s own
+        docstring) follows suit: `5000` when `ref_ld_chr_extra` is left at its UKB
+        default (matching the individual count `l2` compresses from at UK Biobank
+        scale) and `200` -- `LdscRun`'s own default, already well past both the
+        binary's `d <= 50` instability floor and its "practical sweet spot" -- when a
+        caller supplies their own `ref_ld_chr_extra` (e.g. a 1000-Genomes-based
+        baseline, whose reference panel is a couple orders of magnitude smaller).
+        Pass `sketch=` explicitly to override either way.
         """
+        used_ukb_default = ref_ld_chr_extra is _UNSET
         if ref_ld_chr_extra is _UNSET:
             from scads_drvi.enrich.reference import ensure_baseline_ukb
 
@@ -311,6 +322,8 @@ class EnrichmentSweep:
                     cache=reference_cache, allow_download=allow_reference_download
                 ),
             )
+        if sketch is _UNSET:
+            sketch = 5000 if used_ukb_default else 200
         ldsc_run = LdscRun.ensure(
             w_ld_chr=w_ld_chr,
             ld_wind_cm=ld_wind_cm,
@@ -321,6 +334,7 @@ class EnrichmentSweep:
             cache=cache,
             allow_download=allow_download,
             check_version=check_version,
+            sketch=sketch,
             **ldsc_kwargs,
         )
         return cls(

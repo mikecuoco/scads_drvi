@@ -240,6 +240,7 @@ class TestEnsure:
         )
         assert seen_calls == [(None, True)]
         assert s.ref_ld_chr_extra == ("/cache/baselineLF_v2.2.UKB/baselineLF2.2.UKB.",)
+        assert s.ldsc_run.sketch == 5000  # UKB scale: LdscRun's own 200 default is too low
 
     def test_explicit_empty_ref_ld_chr_extra_skips_the_ukb_default(
         self, tmp_path, refs, monkeypatch
@@ -255,4 +256,19 @@ class TestEnsure:
             ref_ld_chr_extra=(), explicit=binary,
             ldscore_dir=tmp_path / "ld", results_dir=tmp_path / "res",
         )
+        assert s.ldsc_run.sketch == 200  # 1000G-scale default, unchanged from LdscRun
         assert s.ref_ld_chr_extra == ()
+
+    def test_explicit_sketch_overrides_either_default(self, tmp_path, refs, monkeypatch):
+        monkeypatch.setattr(
+            "scads_drvi.enrich.reference.ensure_baseline_ukb",
+            lambda *, cache=None, allow_download=True: "/cache/stem.",
+        )
+        binary = fake_binary(tmp_path / "ldsc")
+        s = EnrichmentSweep.ensure(
+            embed=make_embed(), bfile_chr=refs, sumstats={"t1": "x"},
+            annotate=stub_annotate, w_ld_chr="weights.", overlap_annot=False,
+            sketch=999, explicit=binary,
+            ldscore_dir=tmp_path / "ld", results_dir=tmp_path / "res",
+        )
+        assert s.ldsc_run.sketch == 999

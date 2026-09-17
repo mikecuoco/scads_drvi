@@ -204,6 +204,9 @@ sweep = EnrichmentSweep.ensure(
 # LD, preferred over 1000G for a UKB-scale GWAS) -- downloaded once (~11 GB) and
 # cached; point $SCADS_DRVI_CACHE at scratch storage first. Pass
 # ref_ld_chr_extra=() for no baseline categories, or your own stem(s) instead.
+# l2's sketch follows suit: 5000 with the UKB default (matching that scale),
+# 200 -- LdscRun's own default -- once ref_ld_chr_extra is overridden away from it
+# (e.g. to a 1000G-based baseline, a couple orders of magnitude smaller).
 
 results = sweep.run()   # run_l2() -> run_h2() -> read_results(), each independently
                          # resumable (skips work whose output already exists)
