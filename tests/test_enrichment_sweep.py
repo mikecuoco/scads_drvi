@@ -10,8 +10,8 @@ import pytest
 
 ad = pytest.importorskip("anndata")
 
-from scads_drvi.enrich.run import LdscRun
-from scads_drvi.enrich.sweep import EnrichmentSweep
+from scads_drvi.enrich.run import LdscRun  # noqa: E402
+from scads_drvi.enrich.sweep import EnrichmentSweep  # noqa: E402
 
 
 def write_bim(path, snps):
