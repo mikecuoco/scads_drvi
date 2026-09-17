@@ -6,7 +6,8 @@ own tutorials point at), not anything dataset-specific. Having a resolver for it
 lets a test or a notebook validate :mod:`scads_drvi.annotate.motif` against real
 production-scale data without depending on any one researcher's private capsule path.
 
-Mirrors :func:`scads_drvi.enrich.binary.ensure_ldsc`'s resolve/cache/verify shape.
+Mirrors :meth:`scads_drvi.enrich.run.LdscRun._resolve_binary`'s resolve/cache/verify
+shape.
 """
 
 from __future__ import annotations
@@ -80,10 +81,10 @@ def ensure_screen_database(
     """Resolve aertslab's public SCREEN cisTarget score database, downloading if asked.
 
     THE FILE IS ~14 GB. `allow_download` defaults to **False** on purpose: unlike
-    :func:`scads_drvi.enrich.binary.ensure_ldsc`'s small pinned binary, a fresh fetch
-    here takes minutes even on a fast connection and should never happen as a surprise
-    side effect of running a test. Pass it explicitly (or point `cache` at an existing
-    copy, or set ``$SCADS_DRVI_CACHE``) to opt in.
+    :meth:`scads_drvi.enrich.run.LdscRun._resolve_binary`'s small pinned binary, a
+    fresh fetch here takes minutes even on a fast connection and should never happen
+    as a surprise side effect of running a test. Pass it explicitly (or point `cache`
+    at an existing copy, or set ``$SCADS_DRVI_CACHE``) to opt in.
 
     `verify` checks the download against the pinned size and SHA-256 in
     :data:`SCREEN_DATABASES`; a mismatch removes the file rather than returning a
