@@ -18,7 +18,6 @@ back.
 from __future__ import annotations
 
 import subprocess
-import tempfile
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,11 +59,12 @@ class EnrichmentSweep:
     configure -- and must be given explicitly when `embed` is already an in-memory
     object with no path to default from.
 
-    Annotation files are never persisted: each :meth:`run_l2` call writes its "thin"
-    annotation into a fresh temporary directory (respecting ``$TMPDIR``, so pointing it
-    at scratch on a cluster with a small ``/tmp`` needs no option here) immediately
-    before the one ``l2`` subprocess call that consumes it, then discards it -- once
-    that call's ``.l2.ldscore.gz`` exists, the annotation file is never read again.
+    Annotation files persist at the same prefix as their ``.l2.ldscore.gz`` (not a
+    temp directory): confirmed against the real binary that ``h2 --overlap-annot``
+    reads the ``.annot`` file back from ``--ref-ld-chr``'s own prefix to compute each
+    category's ``Prop._SNPs`` -- it errors ("No .annot files found for prefix ...")
+    if that file isn't still there by the time :meth:`run_h2` runs, even though
+    :meth:`run_l2` already finished with it and no code here reads it again.
 
     `bfile_chr` is a ``str.format`` template with a literal ``"{chrom}"``, e.g.
     ``f"{REF}/plink_files/1000G.EUR.hg38.{{chrom}}"``, formatted per chromosome as
@@ -195,17 +195,16 @@ class EnrichmentSweep:
                 bfile = self.bfile_chr.format(chrom=chrom)
                 bim = read_bim(f"{bfile}.bim")
                 values = self.annotate(dim, direction, chrom, bim)
-                with tempfile.TemporaryDirectory() as tmp:
-                    annot_path = write_full_annot(
-                        Path(tmp) / f"{key}.{chrom}.annot.gz",
-                        pd.DataFrame({key: values}),
-                        bim,
+                # Same prefix as `out` (l2's own --out below), not a temp dir -- see
+                # the class docstring: h2 --overlap-annot reads this file back later.
+                annot_path = write_full_annot(
+                    Path(f"{out}.annot.gz"), pd.DataFrame({key: values}), bim
+                )
+                completed.append(
+                    self.ldsc_run.l2(
+                        annot_path, out, bfile=bfile, print_snps=self.print_snps
                     )
-                    completed.append(
-                        self.ldsc_run.l2(
-                            annot_path, out, bfile=bfile, print_snps=self.print_snps
-                        )
-                    )
+                )
         return completed
 
     def run_h2(
