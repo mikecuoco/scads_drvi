@@ -152,7 +152,7 @@ for annot, dim in annot2dim.items():
 
 # resolves/downloads/checksum-verifies the pinned v0.5.0 binary; bfile/w_ld_chr/
 # overlap_annot are set once and reused by every l2/h2 call below. l2() defaults to
-# --sketch 5000 --snp-level-masking for speed (see LdscRun's docstring); pass
+# --sketch 200 --snp-level-masking for speed (see LdscRun's docstring); pass
 # sketch=None, snp_level_masking=False for a bit-identical-to-Python run instead.
 run = LdscRun.ensure(bfile="1000G.EUR.QC.1", w_ld_chr="weights.", overlap_annot=True)
 for annot in annot2dim:

@@ -48,7 +48,7 @@ def run(tmp_path):
 
 class TestL2:
     def test_uses_instance_defaults(self, run):
-        """sketch=5000 and snp_level_masking=True are on by default, for speed;
+        """sketch=200 and snp_level_masking=True are on by default, for speed;
         python_compat defaults off since the binary refuses it together with
         snp-level masking."""
         seen = []
@@ -57,7 +57,7 @@ class TestL2:
         (argv,) = seen
         assert argv == (
             "$ ldsc l2 --bfile 1000G.EUR.QC.1 --annot annot/k1.1.annot.gz "
-            "--ld-wind-cm 1 --sketch 5000 --snp-level-masking --out ld/k1.1"
+            "--ld-wind-cm 1 --sketch 200 --snp-level-masking --out ld/k1.1"
         )
 
     def test_bfile_override_wins(self, run):
@@ -89,8 +89,8 @@ class TestL2:
     def test_sketch_can_be_overridden_per_call(self, run):
         seen = []
         run.log_fn = seen.append
-        run.l2("annot/k1.1.annot.gz", "ld/k1.1", sketch=200)
-        assert "--sketch 200" in seen[0]
+        run.l2("annot/k1.1.annot.gz", "ld/k1.1", sketch=5000)
+        assert "--sketch 5000" in seen[0]
 
     def test_python_compat_and_snp_level_masking_together_is_refused(self, run):
         with pytest.raises(ValueError, match="cannot both be on"):
