@@ -18,17 +18,25 @@ the same ranking when the volcano's x-axis is itself a z-score.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Literal
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
+    from anndata import AnnData
     from matplotlib.axes import Axes
+    from matplotlib.colors import Colormap
     from matplotlib.figure import Figure
+    from matplotlib.image import AxesImage
 
     from scads_drvi.pl.frugal import BoxStats
+
+#: The linkage methods `scipy.cluster.hierarchy.linkage` accepts -- shared by every
+#: `method` parameter in this module that eventually reaches :func:`_cluster_order`, so
+#: an invalid method is caught at the call site rather than inside scipy.
+LinkageMethod = Literal["single", "complete", "average", "weighted", "centroid", "median", "ward"]
 
 __all__ = [
     "factor_distributions",
@@ -82,7 +90,7 @@ def factor_distributions(
     return fig
 
 
-def _cluster_order(matrix: np.ndarray, *, method: str = "average") -> np.ndarray:
+def _cluster_order(matrix: np.ndarray, *, method: LinkageMethod = "average") -> np.ndarray:
     """Leaf order from hierarchical clustering of a correlation matrix.
 
     Shared by :func:`factor_correlation` and :func:`latent_heatmap` so the two don't
@@ -108,7 +116,7 @@ def factor_correlation(
     correlation: pd.DataFrame,
     *,
     vanished: Sequence[str] = (),
-    method: str = "average",
+    method: LinkageMethod = "average",
     cmap: str = "RdBu_r",
 ) -> tuple[Figure, Axes]:
     """Clustered factor-factor correlation, with dead factors greyed rather than hidden.
@@ -169,9 +177,7 @@ def covariate_association(
     order = np.argsort(-np.abs(values))
 
     fig, ax = plt.subplots(figsize=(max(5.0, 0.13 * len(values)), 3.0))
-    colors = [
-        "#D55E00" if abs(v) >= threshold else "#0173B2" for v in values[order]
-    ]
+    colors = ["#D55E00" if abs(v) >= threshold else "#0173B2" for v in values[order]]
     ax.bar(np.arange(len(values)), np.abs(values[order]), color=colors, width=0.9)
     ax.axhline(threshold, color="#949494", linestyle=":", linewidth=0.8)
     ax.set_xticks(np.arange(len(values)))
@@ -230,21 +236,27 @@ def latent_dimension_stats(
 
     ncols = min(ncols, len(columns))
     nrows = int(np.ceil(len(columns) / ncols))
-    fig, axes = plt.subplots(
-        nrows, ncols, figsize=(4.0 * ncols, 2.8 * nrows), squeeze=False
-    )
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.0 * ncols, 2.8 * nrows), squeeze=False)
     flat = axes.ravel()
 
     for ax, column in zip(flat, columns, strict=False):
         values = frame[column].to_numpy(dtype=float)
         ax.plot(rank, values, "-", color="grey", linewidth=0.8, zorder=1)
         ax.scatter(
-            rank[~vanished], values[~vanished], color=palette["kept"], s=10,
-            zorder=2, label="kept",
+            rank[~vanished],
+            values[~vanished],
+            color=palette["kept"],
+            s=10,
+            zorder=2,
+            label="kept",
         )
         ax.scatter(
-            rank[vanished], values[vanished], color=palette["vanished"], s=10,
-            zorder=2, label="vanished",
+            rank[vanished],
+            values[vanished],
+            color=palette["vanished"],
+            s=10,
+            zorder=2,
+            label="vanished",
         )
         ax.set_xlabel("Rank based on Explanation Share")
         ax.set_ylabel((titles or {}).get(column, column))
@@ -259,7 +271,7 @@ def latent_dimension_stats(
             ax.yaxis.set_major_formatter(mticker.ScalarFormatter())
             ax.yaxis.set_minor_formatter(mticker.NullFormatter())
 
-    for ax in flat[len(columns):]:
+    for ax in flat[len(columns) :]:
         fig.delaxes(ax)
 
     if not remove_vanished:
@@ -268,7 +280,7 @@ def latent_dimension_stats(
         # the legend, unlike a raw bbox_to_anchor outside the axes grid, which
         # constrained_layout knows nothing about and can end up squeezing into the last
         # panel, overlapping its own y-axis label.
-        fig.legend(handles, labels, loc="outside center right", frameon=False)
+        fig.legend(handles, labels, loc="outside right center", frameon=False)
 
     return fig, flat[: len(columns)]
 
@@ -281,7 +293,7 @@ def _ordered_latent_matrix(
     title_col: str,
     order_col: str,
     order: Literal["rank", "cluster"],
-    method: str,
+    method: LinkageMethod,
     remove_vanished: bool,
     balance: int | None,
     seed: int,
@@ -346,7 +358,14 @@ def _ordered_latent_matrix(
     return image, dims_ordered, titles, blocks
 
 
-def _draw_latent_heatmap(ax: Axes, image: np.ndarray, titles: list[str], blocks, *, cmap: str):
+def _draw_latent_heatmap(
+    ax: Axes,
+    image: np.ndarray,
+    titles: list[str],
+    blocks: Sequence[tuple[str, int, int]],
+    *,
+    cmap: Colormap | str,
+) -> AxesImage:
     """The imshow + shading + block labels shared by both heatmap-drawing entry points."""
     from scads_drvi.pl.color import robust_norm
 
@@ -363,8 +382,12 @@ def _draw_latent_heatmap(ax: Axes, image: np.ndarray, titles: list[str], blocks,
 
     for name, span_start, span_stop in blocks:
         ax.text(
-            len(titles) - 0.4, (span_start + span_stop - 1) / 2.0, name,
-            va="center", ha="left", fontsize=7,
+            len(titles) - 0.4,
+            (span_start + span_stop - 1) / 2.0,
+            name,
+            va="center",
+            ha="left",
+            fontsize=7,
         )
     return im
 
@@ -385,7 +408,7 @@ def _balanced_rows(categories: pd.Series, *, min_count: int = 10, seed: int = 0)
     )
 
 
-def _directional_split(embed, *, title_col: str | None, order_col: str | None):
+def _directional_split(embed: AnnData, *, title_col: str | None, order_col: str | None) -> AnnData:
     """Every kept dimension becomes two columns, ``"{dim}+"``/``"{dim}-"`` -- a ReLU'd
     positive part and a ReLU'd negative part (as a positive magnitude), zero elsewhere.
 
@@ -400,41 +423,59 @@ def _directional_split(embed, *, title_col: str | None, order_col: str | None):
     """
     import anndata as ad
     import pandas as pd
+    from scipy.sparse import _base as sparse_base
 
-    x = np.asarray(embed.X.toarray() if hasattr(embed.X, "toarray") else embed.X, dtype=float)
+    # `.obs`/`.var` are typed `DataFrame | Dataset2D` (scvi-tools' lazy/backed frame) in
+    # current anndata stubs; this function (like the rest of this module) only ever
+    # handles an ordinary in-memory AnnData.
+    var, obs = embed.var, embed.obs
+    if not isinstance(var, pd.DataFrame) or not isinstance(obs, pd.DataFrame):
+        raise TypeError(
+            "latent_heatmap's directional split needs an in-memory AnnData "
+            "(pandas .obs/.var); a lazy/backed AnnData (e.g. scvi-tools' Dataset2D) is "
+            "not supported here."
+        )
+
+    x_raw = embed.X
+    if x_raw is None:
+        raise ValueError("embed.X must not be None")
+    x = np.asarray(
+        x_raw.toarray() if isinstance(x_raw, sparse_base._spbase) else x_raw,
+        dtype=float,
+    )
     pos_x, neg_x = np.clip(x, 0, None), np.clip(-x, 0, None)
 
-    pos_var, neg_var = embed.var.copy(), embed.var.copy()
+    pos_var, neg_var = var.copy(), var.copy()
     pos_var.index = pd.Index([f"{i}+" for i in embed.var_names])
     neg_var.index = pd.Index([f"{i}-" for i in embed.var_names])
-    if title_col is not None and title_col in embed.var.columns:
+    if title_col is not None and title_col in var.columns:
         pos_var[title_col] = pos_var[title_col].astype(str) + "+"
         neg_var[title_col] = neg_var[title_col].astype(str) + "-"
-    if order_col is not None and order_col in embed.var.columns:
+    if order_col is not None and order_col in var.columns:
         pos_var[order_col] = pos_var[order_col] + 1e-8
         neg_var[order_col] = neg_var[order_col] - 1e-8
 
     return ad.AnnData(
         X=np.concatenate([pos_x, neg_x], axis=1),
-        obs=embed.obs,
+        obs=obs,
         var=pd.concat([pos_var, neg_var]),
     )
 
 
 def latent_heatmap(
-    embed,
+    embed: AnnData,
     categorical_column: str,
     *,
     title_col: str | None = "title",
     order_col: str | None = "order",
     sort_by_categorical: bool = False,
     order: Literal["rank", "cluster"] = "rank",
-    method: str = "average",
+    method: LinkageMethod = "average",
     make_balanced: bool = True,
     remove_vanished: bool = True,
     directional: bool = True,
-    cmap=None,
-    directional_cmap=None,
+    cmap: Colormap | str | None = None,
+    directional_cmap: Colormap | str | None = None,
     figsize: tuple[float, float] | None = None,
     seed: int = 0,
     heritability: pd.Series | None = None,
@@ -512,47 +553,72 @@ def latent_heatmap(
     match: `ax` alone by default, `(bar, ax)` with `heritability` only, `(ax, score)`
     with `cell_scores` only, `(bar, ax, score)` with both.
     """
+    import pandas as pd
     import scanpy as sc
+    from scipy.sparse import _base as sparse_base
 
     from scads_drvi.pl.color import SATURATED_JUST_SKY_CMAP, SATURATED_RED_BLUE_CMAP
 
     cmap = SATURATED_RED_BLUE_CMAP if cmap is None else cmap
     directional_cmap = SATURATED_JUST_SKY_CMAP if directional_cmap is None else directional_cmap
 
-    if order_col is not None and order_col not in embed.var.columns:
+    # `.obs`/`.var` are typed `DataFrame | Dataset2D` (scvi-tools' lazy/backed frame) in
+    # current anndata stubs; this function only ever handles an ordinary in-memory
+    # AnnData, so a non-DataFrame here is a genuine usage error.
+    def _as_frame(obj: object, what: str) -> pd.DataFrame:
+        if not isinstance(obj, pd.DataFrame):
+            raise TypeError(
+                f"{what} must be a pandas DataFrame; a lazy/backed AnnData (e.g. "
+                "scvi-tools' Dataset2D) is not supported here."
+            )
+        return obj
+
+    var = _as_frame(embed.var, "embed.var")
+    obs = _as_frame(embed.obs, "embed.obs")
+    if order_col is not None and order_col not in var.columns:
         raise KeyError(f"{order_col!r} is not a column of embed.var")
-    if categorical_column not in embed.obs.columns:
+    if categorical_column not in obs.columns:
         raise KeyError(f"{categorical_column!r} is not a column of embed.obs")
     if remove_vanished:
-        if "vanished" not in embed.var.columns:
+        if "vanished" not in var.columns:
             raise KeyError('"vanished" is not a column of embed.var')
-        embed = embed[:, ~embed.var["vanished"].to_numpy(dtype=bool)]
+        embed = embed[:, ~var["vanished"].to_numpy(dtype=bool)]
 
     if directional:
         embed = _directional_split(embed, title_col=title_col, order_col=order_col)
 
     if make_balanced:
-        rows = _balanced_rows(embed.obs[categorical_column].astype(str), seed=seed)
+        obs = _as_frame(embed.obs, "embed.obs")
+        rows = _balanced_rows(obs[categorical_column].astype(str), seed=seed)
         embed = embed[rows]
 
-    x = np.asarray(embed.X.toarray() if hasattr(embed.X, "toarray") else embed.X, dtype=float)
+    x_raw = embed.X
+    if x_raw is None:
+        raise ValueError("embed.X must not be None")
+    x = np.asarray(
+        x_raw.toarray() if isinstance(x_raw, sparse_base._spbase) else x_raw,
+        dtype=float,
+    )
+
+    var = _as_frame(embed.var, "embed.var")
+    obs = _as_frame(embed.obs, "embed.obs")
 
     if sort_by_categorical:
         dim_order = np.argsort(np.abs(x).argmax(axis=0))
     elif order == "cluster":
         dim_order = _cluster_order(np.corrcoef(x, rowvar=False), method=method)
     elif order_col is not None:
-        dim_order = np.argsort(embed.var[order_col].to_numpy())
+        dim_order = np.argsort(var[order_col].to_numpy())
     else:
         dim_order = np.arange(x.shape[1])
 
-    ordered_var = embed.var.iloc[dim_order]
+    ordered_var = var.iloc[dim_order]
     vars_to_show = list(
         ordered_var.index if title_col is None else ordered_var[title_col].astype(str)
     )
 
     if figsize is None:
-        figsize = (10, len(embed.obs[categorical_column].unique()) / 6)
+        figsize = (10, len(obs[categorical_column].unique()) / 6)
 
     # Marginal panels need real inches of their own, not a fraction carved out of
     # `figsize` -- that figsize is sized only for the heatmap itself (as little as a
@@ -571,9 +637,7 @@ def latent_heatmap(
         call_figsize = (call_w, call_h)
 
     heatmap_kwargs = (
-        {"cmap": directional_cmap, "vmin": 0}
-        if directional
-        else {"cmap": cmap, "vcenter": 0}
+        {"cmap": directional_cmap, "vmin": 0} if directional else {"cmap": cmap, "vcenter": 0}
     )
     # Whichever slice above (remove_vanished/make_balanced) ran last may still leave
     # embed a view -- sc.pl.heatmap below mutates it in place (sanitizing `.obs`,
@@ -581,9 +645,15 @@ def latent_heatmap(
     if embed.is_view:
         embed = embed.copy()
     axes = sc.pl.heatmap(
-        embed, vars_to_show, categorical_column, gene_symbols=title_col,
-        figsize=call_figsize, show_gene_labels=True, show=False,
-        dendrogram=False, **heatmap_kwargs,
+        embed,
+        vars_to_show,
+        categorical_column,
+        gene_symbols=title_col,
+        figsize=call_figsize,
+        show_gene_labels=True,
+        show=False,
+        dendrogram=False,
+        **heatmap_kwargs,
     )
     heat = axes["heatmap_ax"]
     fig = heat.figure
@@ -593,7 +663,6 @@ def latent_heatmap(
     gap = 0.012
     if heritability is not None or cell_scores is not None:
         import matplotlib.pyplot as plt
-        import pandas as pd
         from matplotlib.ticker import MaxNLocator
 
         adjust: dict[str, float] = {}
@@ -654,7 +723,12 @@ def latent_heatmap(
             positions = np.arange(len(ordered_var))
             colors = significance_colors(q, ramp=DEFAULT_RAMP) if q is not None else "#0173B2"
             bar.bar(
-                positions, z, yerr=se, color=colors, width=0.9, zorder=2,
+                positions,
+                z,
+                yerr=se,
+                color=colors,
+                width=0.9,
+                zorder=2,
                 error_kw={"ecolor": "0.2", "elinewidth": 0.8, "capsize": 2},
             )
             bar.axhline(0, color="0.3", lw=0.6, zorder=1)
@@ -668,19 +742,23 @@ def latent_heatmap(
             if q is not None:
                 boundary = bh_threshold_z(q, z, alpha=alpha)
                 add_threshold_lines(
-                    bar, z=(Z_NOMINAL_ONE_TAILED, Z_HIGH_CONFIDENCE), axis="y",
-                    bh=boundary, alpha=alpha,
+                    bar,
+                    z=(Z_NOMINAL_ONE_TAILED, Z_HIGH_CONFIDENCE),
+                    axis="y",
+                    bh=boundary,
+                    alpha=alpha,
                 )
                 bar.legend(
-                    handles=significance_handles(DEFAULT_RAMP), frameon=False,
-                    fontsize=6, loc="upper right",
+                    handles=significance_handles(DEFAULT_RAMP),
+                    frameon=False,
+                    fontsize=6,
+                    loc="upper right",
                 )
 
         if cell_scores is not None:
             if cell_score_agg not in ("mean", "median", "sum"):
                 raise ValueError(
-                    "cell_score_agg must be 'mean', 'median' or 'sum', got "
-                    f"{cell_score_agg!r}"
+                    f"cell_score_agg must be 'mean', 'median' or 'sum', got {cell_score_agg!r}"
                 )
             missing_cells = [c for c in embed.obs_names if c not in cell_scores.index]
             if missing_cells:
@@ -689,15 +767,20 @@ def latent_heatmap(
                     f"heatmap's cell(s), e.g. {missing_cells[:5]}"
                 )
 
-            cats = embed.obs[categorical_column].astype(str)
-            col = embed.obs[categorical_column]
+            cats = obs[categorical_column].astype(str)
+            col = obs[categorical_column]
             if isinstance(col.dtype, pd.CategoricalDtype):
                 cat_order = [str(c) for c in col.cat.categories]
             else:
                 cat_order = sorted(cats.unique())
             counts = cats.value_counts().reindex(cat_order).fillna(0).to_numpy(dtype=int)
             edges = np.concatenate([[0], np.cumsum(counts)])
-            agg = {"mean": np.mean, "median": np.median, "sum": np.sum}[cell_score_agg]
+            agg_fns: dict[Literal["mean", "median", "sum"], Callable[[np.ndarray], Any]] = {
+                "mean": np.mean,
+                "median": np.median,
+                "sum": np.sum,
+            }
+            agg = agg_fns[cell_score_agg]
             group_values = [
                 cell_scores.loc[cats.index[cats == cat]].to_numpy(dtype=float) for cat in cat_order
             ]
@@ -730,8 +813,13 @@ def latent_heatmap(
                 [right_edge + gap, pos.y0, 0.97 - (right_edge + gap), pos.height], sharey=heat
             )
             score.barh(
-                mids, values_by_cat, xerr=sem_by_cat, height=heights, color=group_colors,
-                zorder=2, error_kw={"ecolor": "0.2", "elinewidth": 0.8, "capsize": 2},
+                mids,
+                values_by_cat,
+                xerr=sem_by_cat,
+                height=heights,
+                color=group_colors,
+                zorder=2,
+                error_kw={"ecolor": "0.2", "elinewidth": 0.8, "capsize": 2},
             )
             score.axvline(0, color="0.3", lw=0.6, zorder=1)
             for spine in ("top", "right", "left"):
@@ -775,10 +863,10 @@ def latent_heatmap_with_heritability(
     title_col: str = "title",
     order_col: str = "order",
     order: Literal["rank", "cluster"] = "rank",
-    method: str = "average",
+    method: LinkageMethod = "average",
     remove_vanished: bool = True,
     balance: int | None = None,
-    cmap=None,
+    cmap: Colormap | str | None = None,
     seed: int = 42,
 ) -> tuple[Figure, tuple[Axes, Axes]]:
     """:func:`latent_heatmap`, with a per-dim heritability bar above it, same column order.
@@ -818,9 +906,16 @@ def latent_heatmap_with_heritability(
     cmap = SATURATED_RED_BLUE_CMAP if cmap is None else cmap
 
     image, dims_ordered, titles, blocks = _ordered_latent_matrix(
-        values, categories, dim_stats,
-        title_col=title_col, order_col=order_col, order=order, method=method,
-        remove_vanished=remove_vanished, balance=balance, seed=seed,
+        values,
+        categories,
+        dim_stats,
+        title_col=title_col,
+        order_col=order_col,
+        order=order,
+        method=method,
+        remove_vanished=remove_vanished,
+        balance=balance,
+        seed=seed,
     )
 
     missing = [d for d in dims_ordered if d not in heritability.index]
@@ -845,7 +940,10 @@ def latent_heatmap_with_heritability(
     bar_height = 1.8
     width = max(4.0, 0.15 * len(dims_ordered)) + 1.5
     fig, (bar, heat) = plt.subplots(
-        2, 1, figsize=(width, bar_height + heatmap_height), sharex=True,
+        2,
+        1,
+        figsize=(width, bar_height + heatmap_height),
+        sharex=True,
         gridspec_kw={"height_ratios": [bar_height, heatmap_height]},
     )
 
@@ -858,11 +956,16 @@ def latent_heatmap_with_heritability(
     if q is not None:
         boundary = bh_threshold_z(q, z, alpha=alpha)
         add_threshold_lines(
-            bar, z=(Z_NOMINAL_ONE_TAILED, Z_HIGH_CONFIDENCE), axis="y",
-            bh=boundary, alpha=alpha,
+            bar,
+            z=(Z_NOMINAL_ONE_TAILED, Z_HIGH_CONFIDENCE),
+            axis="y",
+            bh=boundary,
+            alpha=alpha,
         )
         bar.legend(
-            handles=significance_handles(DEFAULT_RAMP), frameon=False, fontsize=6,
+            handles=significance_handles(DEFAULT_RAMP),
+            frameon=False,
+            fontsize=6,
             loc="upper right",
         )
 

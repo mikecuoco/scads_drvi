@@ -118,9 +118,7 @@ def factor_weights(
     indexed = results.set_index(dim_column)
     missing = [d for d in dims if d not in indexed.index]
     if missing:
-        raise KeyError(
-            f"no result row for {len(missing)} requested factor(s), e.g. {missing[:5]}"
-        )
+        raise KeyError(f"no result row for {len(missing)} requested factor(s), e.g. {missing[:5]}")
     if indexed.index.has_duplicates:
         raise ValueError(
             f"{dim_column!r} is not unique in results -- did you pass more than one "
@@ -169,9 +167,7 @@ def cs_from_z(
             f"e.g. {list(loadings.columns)[:3]}."
         )
 
-    weights = factor_weights(
-        results, dims=dims, column=column, clip_negative=clip_negative
-    )
+    weights = factor_weights(results, dims=dims, column=column, clip_negative=clip_negative)
 
     n = len(loadings)
     out = np.empty(n, dtype=np.float64)

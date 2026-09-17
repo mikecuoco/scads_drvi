@@ -37,10 +37,23 @@ class SlowStorageWarning(UserWarning):
 #: simply not warned about -- a false negative is much cheaper here than a false alarm.
 NETWORK_FILESYSTEMS = frozenset(
     {
-        "nfs", "nfs4", "cifs", "smb3", "smbfs", "afs", "9p",
-        "lustre", "gpfs", "beegfs", "panfs",
-        "ceph", "glusterfs", "ocfs2",
-        "fuse.sshfs", "fuse.glusterfs", "fuse.cephfs",
+        "nfs",
+        "nfs4",
+        "cifs",
+        "smb3",
+        "smbfs",
+        "afs",
+        "9p",
+        "lustre",
+        "gpfs",
+        "beegfs",
+        "panfs",
+        "ceph",
+        "glusterfs",
+        "ocfs2",
+        "fuse.sshfs",
+        "fuse.glusterfs",
+        "fuse.cephfs",
     }
 )
 
@@ -67,7 +80,7 @@ def _human(size: int) -> str:
     return f"{value:.1f} TiB"  # unreachable; keeps the type checker happy
 
 
-def filesystem_type(path: str | os.PathLike) -> str | None:
+def filesystem_type(path: str | os.PathLike[str]) -> str | None:
     """The filesystem type backing `path`, or None if it cannot be determined.
 
     Resolves `path`, then picks the mount entry with the longest matching prefix --
@@ -105,14 +118,14 @@ def filesystem_type(path: str | os.PathLike) -> str | None:
     return best_type
 
 
-def is_network_storage(path: str | os.PathLike) -> bool:
+def is_network_storage(path: str | os.PathLike[str]) -> bool:
     """True when `path` sits on a filesystem type known to be network-backed."""
     fs_type = filesystem_type(path)
     return fs_type is not None and fs_type in NETWORK_FILESYSTEMS
 
 
 def check_storage(
-    path: str | os.PathLike,
+    path: str | os.PathLike[str],
     *,
     kind: str = "input",
     min_bytes: int = 1 << 30,

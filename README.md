@@ -8,11 +8,22 @@ single-cell ATAC data.
 ```bash
 pip install -e .                    # normal case
 pip install -e . --no-deps          # inside a mamba-solved prefix
+pip install git+https://github.com/mikecuoco/scads_drvi.git
 ```
 
 `--no-deps` matters in a conda/mamba environment: letting pip re-resolve `numpy`/`torch`
 across a solved prefix will break it. Floor: Python 3.12 / numpy 2 / pandas 2.3
 (scanpy's own floor).
+
+## Development
+
+```bash
+pip install -e '.[dev,test]'
+prek run --all-files   # ruff check --fix, ruff format, mypy src
+```
+
+`prek install` wires the same checks into a git pre-commit hook, run automatically on
+`git commit`.
 
 ## Getting started
 

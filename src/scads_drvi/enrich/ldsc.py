@@ -114,16 +114,13 @@ def read_results(
             records.append(record)
 
     if not records:
-        raise FileNotFoundError(
-            f"no .results files found under {results_root} for traits {traits}"
-        )
+        raise FileNotFoundError(f"no .results files found under {results_root} for traits {traits}")
 
     frame = pd.DataFrame.from_records(records)
     if fdr:
         if Z_COLUMN not in frame.columns:
             raise KeyError(
-                f"{Z_COLUMN!r} not in the result files; columns are "
-                f"{list(frame.columns)}"
+                f"{Z_COLUMN!r} not in the result files; columns are {list(frame.columns)}"
             )
         frame = _add_fdr(frame, by=by, z_col=Z_COLUMN)
     return frame.reset_index(drop=True)
