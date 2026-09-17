@@ -15,12 +15,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from scads_drvi.enrich.binary import LDSC_VERSION, LdscBinary, ensure_ldsc, run_ldsc
+from scads_drvi.enrich.binary import (
+    APPROXIMATE_FLAGS,
+    LDSC_VERSION,
+    LdscBinary,
+    ensure_ldsc,
+    run_ldsc,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
 
 __all__ = ["LdscRun"]
+
+#: Sentinel distinguishing "use the instance default" from an explicit per-call value
+#: (including one that turns a default-on flag off, e.g. ``sketch=None``).
+_UNSET = object()
 
 
 @dataclass
@@ -32,6 +42,20 @@ class LdscRun:
     `overlap_annot` on :meth:`h2`) for the case where they legitimately vary within one
     run -- e.g. a per-chromosome sweep passes a different `bfile` to each :meth:`l2`
     call while everything else stays fixed.
+
+    `sketch` and `snp_level_masking` default to on (``5000`` and ``True``) for speed:
+    the Rust binary's own ``l2 --help`` calls ``d <= 50`` numerically unstable and
+    ``d=200`` "the practical sweet spot", so ``5000`` is comfortably past both, and
+    ``snp_level_masking`` is described there as exact-and-free rather than
+    approximate. Because ``--python-compat`` disables ``snp_level_masking`` on the
+    binary itself (it exists to reproduce Python LDSC's chunk-level approximation
+    exactly), `python_compat` defaults to `False` here to match -- the opposite of
+    :func:`~scads_drvi.enrich.binary.run_ldsc`'s own default, which is bit-identical
+    reproduction, not speed. `l2`'s `allow_approximate` gate on
+    :func:`~scads_drvi.enrich.binary.run_ldsc` is derived automatically from whether an
+    :data:`~scads_drvi.enrich.binary.APPROXIMATE_FLAGS` entry ends up set, rather than
+    a separate switch to remember: setting `sketch` (here or per call) is itself the
+    opt-in.
     """
 
     binary: LdscBinary | str | Path
@@ -40,8 +64,9 @@ class LdscRun:
     w_ld_chr: str | Path | None = None
     overlap_annot: bool = True
     threads: int | None = None
-    python_compat: bool = True
-    allow_approximate: bool = False
+    python_compat: bool = False
+    sketch: int | None = 5000
+    snp_level_masking: bool = True
     check: bool = True
     dry_run: bool = False
     log_fn: Callable[[str], None] | None = None
@@ -81,14 +106,19 @@ class LdscRun:
         )
 
     def _run(
-        self, subcommand: str, options: Mapping[str, object], *, python_compat: bool
+        self,
+        subcommand: str,
+        options: Mapping[str, object],
+        *,
+        python_compat: bool,
+        allow_approximate: bool = False,
     ) -> subprocess.CompletedProcess:
         return run_ldsc(
             subcommand,
             options,
             binary=self.binary,
             python_compat=python_compat,
-            allow_approximate=self.allow_approximate,
+            allow_approximate=allow_approximate,
             threads=self.threads,
             check=self.check,
             dry_run=self.dry_run,
@@ -101,21 +131,43 @@ class LdscRun:
         out: str | Path,
         *,
         bfile: str | Path | None = None,
+        python_compat: bool = _UNSET,
+        sketch: int | None = _UNSET,
+        snp_level_masking: bool = _UNSET,
         **extra: object,
     ) -> subprocess.CompletedProcess:
-        """``ldsc l2`` for one annotation, using `self.bfile`/`self.ld_wind_cm` unless
-        overridden."""
+        """``ldsc l2`` for one annotation, using the instance's `bfile`/`ld_wind_cm`/
+        `sketch`/`snp_level_masking`/`python_compat` unless overridden."""
         bfile = bfile if bfile is not None else self.bfile
         if bfile is None:
             raise ValueError("no bfile: pass one to l2(), or set it on the LdscRun")
+        python_compat = self.python_compat if python_compat is _UNSET else python_compat
+        sketch = self.sketch if sketch is _UNSET else sketch
+        snp_level_masking = (
+            self.snp_level_masking if snp_level_masking is _UNSET else snp_level_masking
+        )
+        if python_compat and snp_level_masking:
+            raise ValueError(
+                "python_compat and snp_level_masking cannot both be on for one l2() "
+                "call: the ldsc binary itself refuses --python-compat with "
+                "--snp-level-masking (--python-compat disables snp-level masking to "
+                "reproduce Python LDSC's chunk-level approximation exactly). Pass "
+                "snp_level_masking=False to keep python_compat, or leave python_compat "
+                "at the LdscRun default (False) to keep snp_level_masking."
+            )
         options = {
             "bfile": bfile,
             "annot": annot,
             "ld_wind_cm": self.ld_wind_cm,
+            "sketch": sketch,
+            "snp_level_masking": snp_level_masking,
             "out": out,
             **extra,
         }
-        return self._run("l2", options, python_compat=self.python_compat)
+        allow_approximate = any(options.get(flag) for flag in APPROXIMATE_FLAGS)
+        return self._run(
+            "l2", options, python_compat=python_compat, allow_approximate=allow_approximate
+        )
 
     def h2(
         self,
