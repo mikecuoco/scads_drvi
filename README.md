@@ -14,6 +14,12 @@ pip install -e . --no-deps          # inside a mamba-solved prefix
 across a solved prefix will break it. Floor: Python 3.12 / numpy 2 / pandas 2.3
 (scanpy's own floor).
 
+The S-LDSC dependency (`ldsc-rs`, from
+[`mikecuoco/ldsc`](https://github.com/mikecuoco/ldsc)) has no PyPI release — it is
+built from source by `maturin` when you `pip install`, which needs a Rust ≥1.85
+toolchain available first (e.g. `micromamba install rust maturin` on a machine with
+no system Rust).
+
 ## Getting started
 
 Four stages, each callable on its own — no orchestrator strings them together, and
@@ -71,19 +77,27 @@ recorded it (e.g. your own `provenance` dict).
 
 ### 2. Enrich (S-LDSC)
 
+S-LDSC itself runs through [`mikecuoco/ldsc`](https://github.com/mikecuoco/ldsc)'s
+Python bindings (`ldsc-rs`, a declared dependency built from source with `maturin` --
+this needs a Rust ≥1.85 toolchain available when you `pip install`, e.g.
+`micromamba install rust maturin` first on a machine with no system Rust).
+
 Starting from the `embed` written above: `select_factors` reads the `vanished` flags
 `set_latent_dimension_stats` already wrote onto `embed.var` and decides which
 dimensions get enriched, under which `k` index. Each kept dimension's non-negative
 loadings (`np.clip(embed.X, 0, None)`, one column per `keep`) become a per-SNP
-annotation, widened to the full format the Rust binary requires, then run through
-`l2`/`h2`:
+annotation, written thin (bare annotation column, no `CHR SNP BP CM`) since
+`ldsc_rs` accepts that shape directly, then run through `estimate_ldscore`/`estimate_h2`
+directly — no wrapper class, this package has no dedicated sweep object:
 
 ```python
 import numpy as np
+import pandas as pd
+from ldsc_rs import estimate_h2, estimate_ldscore
 
-from scads_drvi.enrich.annotations import read_bim, write_full_annot
+from scads_drvi.enrich.annotations import read_bim
 from scads_drvi.enrich.config import kept_dims, select_factors
-from scads_drvi.enrich.run import LdscRun
+from scads_drvi.enrich.ldsc import read_results
 
 fmap = select_factors(embed.var, list(embed.var_names))
 keep = kept_dims(fmap)                       # dims that survive vanished-filtering
@@ -94,61 +108,35 @@ loadings = np.clip(embed[:, keep].X, 0, None)   # relu -- annotation weights are
 
 for annot, dim in annot2dim.items():
     thin = ...  # bim-ordered per-SNP annotation derived from loadings[:, keep.index(dim)]
-    write_full_annot(f"annot/{annot}.1.annot.gz", thin, bim)
+    pd.DataFrame({annot: thin}).to_csv(f"annot/{annot}.1.annot.gz", sep="\t", index=False)
+    # thin_annot=True accepts that shape directly; out= writes .l2.ldscore.gz/.M/.M_5_50
+    # (sketch=200, snp_level_masking=True for speed; pass sketch=None,
+    # snp_level_masking=False for the exact per-SNP path instead).
+    estimate_ldscore(
+        "1000G.EUR.QC.1", annot=f"annot/{annot}.1.annot.gz", thin_annot=True,
+        out=f"ld/{annot}.1", window=("cm", 1.0), sketch=200, snp_level_masking=True,
+    )
+    # out=/print_coefficients=True writes results/trait/{annot}.results, in the same
+    # format ldsc's own CLI would have.
+    estimate_h2(
+        "trait.sumstats.gz", ref_ld_chr=f"ld/{annot}.", w_ld_chr="weights.",
+        overlap_annot=True, frqfile_chr="1000G.EUR.QC.", out=f"results/trait/{annot}",
+        print_coefficients=True,
+    )
 
-# resolves/downloads/checksum-verifies the pinned v0.5.0 binary; bfile/w_ld_chr/
-# overlap_annot are set once and reused by every l2/h2 call below. l2() defaults to
-# --sketch 200 --snp-level-masking for speed (see LdscRun's docstring); pass
-# sketch=None, snp_level_masking=False for a bit-identical-to-Python run instead.
-run = LdscRun.ensure(bfile="1000G.EUR.QC.1", w_ld_chr="weights.", overlap_annot=True)
-for annot in annot2dim:
-    run.l2(f"annot/{annot}.1.annot.gz", f"ld/{annot}.1")
-    run.h2("trait.sumstats.gz", f"ld/{annot}.", f"results/trait/{annot}")
-
-results = run.read_results("results", traits=["trait"], annot2dim=annot2dim)
+results = read_results("results", traits=["trait"], annot2dim=annot2dim)
 embed.uns.setdefault("enrich", {})["my_arm"] = {
     "results": results, "factor_selection": fmap.drop(columns="annot_index")
 }
 # tidy dim/direction/trait table, one row per (factor, trait), with BH q already attached
 ```
 
-For the real sweep -- every kept factor, both loading directions, every chromosome --
-`EnrichmentSweep` does the loop above for you: factor selection, the per-chromosome
-`l2`, `h2` combining each factor's own LD scores with a baseline reference, and
-`read_results`, from just `embed` (an h5ad path by default), a reference panel, and
-sumstats. Peak-to-SNP annotation building is still yours (`annotate` below) -- this
-package has never owned that overlap:
-
-```python
-from scads_drvi.enrich.sweep import EnrichmentSweep
-
-def annotate(dim, direction, chrom, bim):
-    ...  # your own peak -> per-SNP overlap for this (dim, direction, chromosome)
-    return hit  # 1-D array-like, len(bim), in bim's row order
-
-sweep = EnrichmentSweep.ensure(
-    embed="my_fit_cells.h5ad",                       # loaded once, exposed as sweep.adata
-    bfile_chr=f"{REF}/plink_files/1000G.EUR.hg38.{{chrom}}",
-    w_ld_chr=f"{REF}/weights/weights.hm3_noMHC.",
-    frqfile_chr=f"{REF}/plink_files/1000G.EUR.hg38.",
-    sumstats={"trait_a": "trait_a.sumstats.gz", "trait_b": "trait_b.sumstats.gz"},
-    annotate=annotate,
-)
-# ref_ld_chr_extra defaults to the baseline-LF v2.2 UK Biobank reference (in-sample
-# LD, preferred over 1000G for a UKB-scale GWAS) -- downloaded once (~11 GB) and
-# cached; point $SCADS_DRVI_CACHE at scratch storage first. Pass
-# ref_ld_chr_extra=() for no baseline categories, or your own stem(s) instead.
-# l2's sketch follows suit: 5000 with the UKB default (matching that scale),
-# 200 -- LdscRun's own default -- once ref_ld_chr_extra is overridden away from it
-# (e.g. to a 1000G-based baseline, a couple orders of magnitude smaller).
-
-results = sweep.run()   # run_l2() -> run_h2() -> read_results(), each independently
-                         # resumable (skips work whose output already exists)
-sweep.adata.uns.setdefault("enrich", {})["my_arm"] = {
-    "results": results, "factor_selection": sweep.fmap.drop(columns="annot_index")
-}
-sweep.adata.write_h5ad("my_fit_cells.h5ad")
-```
+A real run — every kept factor, both loading directions, every chromosome — is the
+same loop, over dims × directions × chromosomes, with an `if Path(...).exists():
+continue` guard on each output so re-running only computes what isn't already there.
+See `docs/tutorials/pbmc.ipynb`'s "Enrich" section for the full real example (peak→SNP
+annotation building, a baseline reference layered under each factor's own annotation,
+resumability across a multi-hour run).
 
 ### 3. Annotate (motif enrichment)
 

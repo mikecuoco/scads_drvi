@@ -43,6 +43,12 @@ dependencies = [
     "bioframe>=0.6",
     # annotate.motif's score-database streaming (stream_accumulate and friends).
     "pyarrow>=14",
+    # enrich's S-LDSC backend: LD-score/heritability computation via mikecuoco/ldsc's
+    # Rust core through its PyO3 bindings. No PyPI release -- built from source by
+    # maturin, which needs a Rust >=1.85 toolchain available at install time (e.g.
+    # `micromamba install rust maturin` on a cluster with no system Rust). Pinned to
+    # a specific commit rather than `main`, bumped deliberately as ldsc_rs evolves.
+    "ldsc-rs @ git+https://github.com/mikecuoco/ldsc.git@ee5ab73918ad8801f9cd14de73d745273fc216fd#subdirectory=python",
 ]
 
 # torch/scvi-tools/drvi-py are not imported anywhere in this package (training and
