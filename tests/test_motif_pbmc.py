@@ -6,8 +6,8 @@ correctly on a real genome's real region names, using the same public 10x PBMC
 multiome sample `docs/tutorials/pbmc.ipynb` builds the whole package's tutorial on.
 
 Two tests, both `@pytest.mark.data` and self-skipping (not failing the run) when
-their resource isn't available -- `test_ldsc_binary.py`'s pattern for the real LDSC
-binary:
+their resource isn't available -- `test_enrich_reference.py`'s pattern for the real
+UKB baseline reference:
 
 - against a small SYNTHETIC score database built over translated copies of the real
   peak coordinates, requiring nothing beyond network access to the public 10x sample;

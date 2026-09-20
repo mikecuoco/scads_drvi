@@ -158,32 +158,21 @@ def provision_ldsc_reference(data_dir: Path = DATA) -> Path:
         print(f"copying reference panel from {CAPSULE_REF} to {dest}...")
         subprocess.run(["rsync", "-a", f"{CAPSULE_REF}/", f"{dest}/"], check=True)
 
-    # ldsc's --print-snps wants a bare single column of SNP IDs; w_hm3.snplist ships
-    # as SNP/A1/A2 (needed as-is for munge-sumstats --merge-alleles) -- derive the
-    # single-column form once instead of reshaping it inline wherever it's used.
-    print_snps = dest / "w_hm3.snplist.print_snps"
-    if not print_snps.exists():
-        with open(dest / "w_hm3.snplist") as f_in, open(print_snps, "w") as f_out:
-            next(f_in)  # header
-            for line in f_in:
-                f_out.write(line.split("\t", 1)[0] + "\n")
-
     # baselineLD_v2.2's own annot files (from the standard Alkes-group distribution,
     # not written by this package) carry CM as bare "0" for early low-recombination
-    # SNPs and only turn fractional later -- the Rust h2 --overlap-annot reader infers
-    # one dtype from a leading sample and then fails on the mix. force_decimal is
-    # scads_drvi's own fix for exactly this (see enrich.annotations); apply it once to
-    # the reference's files too, since we don't control how they were originally written.
+    # SNPs and only turn fractional later -- a CSV reader that infers a column's dtype
+    # from a leading sample can misread it as integer and then fail on the first
+    # fractional value. Force CM to float once, up front, since we don't control how
+    # the reference's own files were originally written.
     fixed_marker = dest / "baselineLD_v2.2" / ".cm_fixed"
     if not fixed_marker.exists():
         import pandas as pd
 
-        from scads_drvi.enrich.annotations import force_decimal
-
         print("fixing non-decimal CM column in baselineLD_v2.2 annot files...")
         for chrom in range(1, 23):
             annot_path = dest / "baselineLD_v2.2" / f"baselineLD.{chrom}.annot.gz"
-            df = force_decimal(pd.read_csv(annot_path, sep="\t"), columns=["CM"])
+            df = pd.read_csv(annot_path, sep="\t")
+            df["CM"] = df["CM"].astype("float64")
             df.to_csv(annot_path, sep="\t", index=False, compression="gzip")
         fixed_marker.write_text("")
     return dest
@@ -211,21 +200,22 @@ def download_and_munge_sumstats(data_dir: Path = DATA, ref_dir: Path | None = No
         print(f"already munged: {munged_path}")
         return munged_path
 
-    from scads_drvi.enrich.binary import ensure_ldsc, run_ldsc
+    from ldsc_rs import munge_sumstats
 
-    # ensure_ldsc resolves the actual binary path (PATH -> cache -> verified download);
-    # run_ldsc's own default ("ldsc") assumes it's already on PATH, which it isn't here.
-    ldsc_bin = ensure_ldsc()
-    run_ldsc("munge-sumstats", {
-        "sumstats": str(raw_path),
-        "snp": "variant_id", "a1": "effect_allele", "a2": "other_allele",
-        "p": "p_value", "signed_sumstats": "beta,0", "N": SUMSTATS_N,
+    munge_sumstats(
+        str(raw_path),
+        str(sumstats_dir / "ra_ishigaki2022_eur"),
+        snp_col="variant_id",
+        a1_col="effect_allele",
+        a2_col="other_allele",
+        p_col="p_value",
+        signed_sumstats="beta,0",
+        n=SUMSTATS_N,
         # chromosome mixes ints (autosomes) with "X" -- the Rust CSV parser infers one
         # dtype for the whole column and chokes on it; we don't use this column anyway.
-        "ignore": "chromosome",
-        "merge_alleles": str(ref_dir / "w_hm3.snplist"),
-        "out": str(sumstats_dir / "ra_ishigaki2022_eur"),
-    }, binary=ldsc_bin)
+        ignore="chromosome",
+        merge_alleles=str(ref_dir / "w_hm3.snplist"),
+    )
     if not munged_path.exists():
         raise FileNotFoundError(f"munge-sumstats did not produce {munged_path}")
     return munged_path
