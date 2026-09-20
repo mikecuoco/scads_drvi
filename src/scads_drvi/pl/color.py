@@ -15,13 +15,18 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
+from numpy.typing import ArrayLike, NDArray
 
 if TYPE_CHECKING:  # pragma: no cover
+    from matplotlib.axes import Axes
     from matplotlib.colors import Normalize
+    from matplotlib.lines import Line2D
+
+_CmapSegmentData = dict[Literal["red", "green", "blue", "alpha"], Sequence[tuple[float, ...]]]
 
 __all__ = [
     "ROBUST_LIMITS",
@@ -49,27 +54,42 @@ ROBUST_LIMITS: tuple[float, float] = (1.0, 99.5)
 # (https://github.com/theislab/DRVI/blob/main/src/drvi/utils/plotting/_cmap.py), so
 # `latent_umap_grid`/`latent_heatmap` render with the exact colours DRVI's own
 # `plot_latent_dims_in_umap`/`plot_latent_dims_in_heatmap` do.
-_cmap_data = {
+_red_blue_data: _CmapSegmentData = {
     "red": ((0.0, 0.0, 0.0), (0.25, 0.0, 0.0), (0.5, 1.0, 1.0), (0.75, 1.0, 1.0), (1.0, 0.5, 0.0)),
-    "green": ((0.0, 0.0, 0.0), (0.25, 0.0, 0.0), (0.5, 1.0, 1.0), (0.75, 0.0, 0.0), (1.0, 0.0, 0.0)),
+    "green": (
+        (0.0, 0.0, 0.0),
+        (0.25, 0.0, 0.0),
+        (0.5, 1.0, 1.0),
+        (0.75, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+    ),
     "blue": ((0.0, 0.0, 0.5), (0.25, 1.0, 1.0), (0.5, 1.0, 1.0), (0.75, 0.0, 0.0), (1.0, 0.0, 0.0)),
 }
-SATURATED_RED_BLUE_CMAP = LinearSegmentedColormap("SaturatedRdBu", _cmap_data)
+SATURATED_RED_BLUE_CMAP = LinearSegmentedColormap("SaturatedRdBu", _red_blue_data)
 
-_cmap_data = {
+_just_sky_data: _CmapSegmentData = {
     "red": ((0.0, 0.0, 240 / 256), (0.75, 0.0, 0.0), (1.0, 0.0, 0.0)),
     "green": ((0.0, 0.0, 240 / 256), (0.75, 200 / 255, 200 / 255), (1.0, 63 / 255, 0.0)),
     "blue": ((0.0, 0.0, 240 / 256), (0.75, 255 / 255, 255 / 255), (1.0, 80 / 255, 0.0)),
 }
-SATURATED_JUST_SKY_CMAP = LinearSegmentedColormap("SaturatedJSky", _cmap_data)
+SATURATED_JUST_SKY_CMAP = LinearSegmentedColormap("SaturatedJSky", _just_sky_data)
 
-_cmap_data = {
+_sky_data: _CmapSegmentData = {
     "red": ((0.0, 0.0, 136 / 255), (0.5, 250 / 256, 250 / 256), (0.65, 0.0, 0.0), (1.0, 0.0, 0.0)),
-    "green": ((0.0, 0.0, 136 / 255), (0.5, 250 / 256, 250 / 256), (0.65, 200 / 255, 200 / 255), (1.0, 63 / 255, 0.0)),
-    "blue": ((0.0, 0.0, 136 / 255), (0.5, 250 / 256, 250 / 256), (0.65, 255 / 255, 255 / 255), (1.0, 80 / 255, 0.0)),
+    "green": (
+        (0.0, 0.0, 136 / 255),
+        (0.5, 250 / 256, 250 / 256),
+        (0.65, 200 / 255, 200 / 255),
+        (1.0, 63 / 255, 0.0),
+    ),
+    "blue": (
+        (0.0, 0.0, 136 / 255),
+        (0.5, 250 / 256, 250 / 256),
+        (0.65, 255 / 255, 255 / 255),
+        (1.0, 80 / 255, 0.0),
+    ),
 }
-SATURATED_SKY_CMAP = LinearSegmentedColormap("SaturatedSky", _cmap_data)
-del _cmap_data
+SATURATED_SKY_CMAP = LinearSegmentedColormap("SaturatedSky", _sky_data)
 
 #: One-tailed nominal significance in z. Derived, not the retyped 1.645.
 Z_NOMINAL_ONE_TAILED: float = 1.6448536269514722
@@ -79,7 +99,7 @@ Z_HIGH_CONFIDENCE: float = 3.0
 
 
 def robust_limits(
-    values,
+    values: ArrayLike,
     *,
     percentiles: tuple[float, float] = ROBUST_LIMITS,
     symmetric: bool = False,
@@ -106,9 +126,7 @@ def robust_limits(
 
     low_pct, high_pct = percentiles
     if not 0 <= low_pct < high_pct <= 100:
-        raise ValueError(
-            f"percentiles must satisfy 0 <= low < high <= 100, got {percentiles}"
-        )
+        raise ValueError(f"percentiles must satisfy 0 <= low < high <= 100, got {percentiles}")
 
     low, high = (float(x) for x in np.percentile(array, [low_pct, high_pct]))
     if floor is not None:
@@ -125,7 +143,7 @@ def robust_limits(
 
 
 def robust_norm(
-    values,
+    values: ArrayLike,
     *,
     percentiles: tuple[float, float] = ROBUST_LIMITS,
     gamma: float = 1.0,
@@ -197,8 +215,8 @@ DEFAULT_RAMP = SignificanceRamp()
 
 
 def significance_class(
-    values, *, thresholds: Sequence[float] = DEFAULT_RAMP.thresholds
-) -> np.ndarray:
+    values: ArrayLike, *, thresholds: Sequence[float] = DEFAULT_RAMP.thresholds
+) -> NDArray[np.intp]:
     """Ordinal class per test: 0 is the most significant, len(thresholds) the least.
 
     NaN sorts into the least-significant class -- a test that could not be evaluated is
@@ -211,13 +229,13 @@ def significance_class(
     return out
 
 
-def significance_colors(values, *, ramp: SignificanceRamp = DEFAULT_RAMP) -> list[str]:
+def significance_colors(values: ArrayLike, *, ramp: SignificanceRamp = DEFAULT_RAMP) -> list[str]:
     """Per-point colours from q-values."""
     classes = significance_class(values, thresholds=ramp.thresholds)
     return [ramp.colors[c] for c in classes.ravel()]
 
 
-def significance_handles(ramp: SignificanceRamp = DEFAULT_RAMP) -> list:
+def significance_handles(ramp: SignificanceRamp = DEFAULT_RAMP) -> list[Line2D]:
     """Legend proxies, so a ramped panel can actually be read."""
     from matplotlib.lines import Line2D
 
@@ -271,16 +289,14 @@ def categorical_palette(
         wanted = [highlight] if isinstance(highlight, str) else list(highlight)
         unknown = [h for h in wanted if str(h) not in palette]
         if unknown:
-            raise KeyError(
-                f"cannot highlight {unknown}: not among the categories given"
-            )
+            raise KeyError(f"cannot highlight {unknown}: not among the categories given")
         for name in wanted:
             palette[str(name)] = highlight_color
     return palette
 
 
 def add_threshold_lines(
-    ax,
+    ax: Axes,
     *,
     z: Sequence[float] = (Z_NOMINAL_ONE_TAILED, Z_HIGH_CONFIDENCE),
     axis: str = "y",

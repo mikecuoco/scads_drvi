@@ -59,6 +59,11 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=7.4"]
 drvi = ["scvi-tools>=1.5", "torch>=2.4", "drvi-py>=0.2.7"]
+# annotate.llm's LLM-based factor annotation (annotate_factor/annotate_factors). An
+# optional extra rather than a hard dependency for the same reason as `drvi`:
+# annotate.llm imports it function-locally, so the base install stays light for
+# callers who never call into that one module.
+llm = ["anthropic>=0.40"]
 docs = [
     "sphinx>=7.3",
     "sphinx-book-theme>=1.1",
@@ -66,6 +71,18 @@ docs = [
     "sphinx-copybutton>=0.5",
     "myst-nb>=1.1",
     "jupytext>=1.16",
+]
+# mypy plus stub packages for the runtime deps that don't ship py.typed themselves
+# (pandas, scipy, pyarrow, pyyaml, seaborn -- numpy/anndata/matplotlib already do).
+# scanpy/bioframe/h5py have no stub package on PyPI; those get an ignore_missing_imports
+# override in [tool.mypy] instead.
+dev = [
+    "mypy>=1.11",
+    "pandas-stubs>=2.3",
+    "scipy-stubs>=1.13",
+    "pyarrow-stubs>=17",
+    "types-PyYAML>=6.0",
+    "types-seaborn>=0.13",
 ]
 [project.urls]
 Homepage = "https://github.com/mikecuoco/scads_drvi"
@@ -111,3 +128,28 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
 # is the point.
 "src/scads_drvi/__init__.py" = ["F401"]
 "src/scads_drvi/*/__init__.py" = ["F401"]
+
+# Type checking. Scoped to src/ only, not tests/: pytest fixtures and parametrize
+# are conventionally lightly annotated, same "signal not coverage" reasoning as the
+# ruff rule selection above.
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+strict = true
+warn_unreachable = true
+# This HPC's shared Python 3.13 build has no _sqlite3 extension module, which
+# crashes mypy's sqlite-backed cache with an internal error; the file-based cache
+# works everywhere and costs little.
+sqlite_cache = false
+
+# No stub package exists for these on PyPI; without this override strict mode fails
+# on every import instead of checking real code.
+[[tool.mypy.overrides]]
+module = ["scanpy.*", "bioframe.*", "h5py.*"]
+ignore_missing_imports = true
+
+# anthropic backs the optional `llm` extra and is imported function-locally in
+# annotate/llm.py, so it isn't installed by the `dev` extra alone.
+[[tool.mypy.overrides]]
+module = ["anthropic.*"]
+ignore_missing_imports = true
