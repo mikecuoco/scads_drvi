@@ -14,7 +14,10 @@ Colors use the Wong (2011) 8-color colorblind-safe palette
 Illustrator / Inkscape.  No dependence on ~/.config/matplotlib — the
 style is fully self-contained.
 """
+
 from __future__ import annotations
+
+from typing import Any
 
 # Wong (2011) colorblind-safe palette — 8 colours
 WONG = [
@@ -32,70 +35,70 @@ WONG = [
 # Core rcParams dict (everything except axes.prop_cycle, which must
 # be set as a cycler object — handled in apply_style() below).
 # ------------------------------------------------------------------
-_BASE: dict = {
+_BASE: dict[str, Any] = {
     # ── Typography ─────────────────────────────────────────────────
-    "font.family":              "sans-serif",
-    "font.sans-serif":          ["Arial", "Helvetica", "Liberation Sans", "DejaVu Sans"],
-    "font.size":                8,          # tick labels, legend body
-    "axes.titlesize":           9,
-    "axes.titleweight":         "normal",
-    "axes.titlepad":            5,
-    "axes.labelsize":           9,
-    "axes.labelpad":            3,
-    "xtick.labelsize":          8,
-    "ytick.labelsize":          8,
-    "legend.fontsize":          8,
-    "legend.title_fontsize":    9,
+    "font.family": "sans-serif",
+    "font.sans-serif": ["Arial", "Helvetica", "Liberation Sans", "DejaVu Sans"],
+    "font.size": 8,  # tick labels, legend body
+    "axes.titlesize": 9,
+    "axes.titleweight": "normal",
+    "axes.titlepad": 5,
+    "axes.labelsize": 9,
+    "axes.labelpad": 3,
+    "xtick.labelsize": 8,
+    "ytick.labelsize": 8,
+    "legend.fontsize": 8,
+    "legend.title_fontsize": 9,
     # ── Colours ────────────────────────────────────────────────────
-    "text.color":               "black",
-    "axes.edgecolor":           "black",
-    "axes.labelcolor":          "black",
-    "xtick.color":              "black",
-    "ytick.color":              "black",
-    "figure.facecolor":         "white",
-    "axes.facecolor":           "white",
-    "savefig.facecolor":        "white",
-    "savefig.edgecolor":        "white",
+    "text.color": "black",
+    "axes.edgecolor": "black",
+    "axes.labelcolor": "black",
+    "xtick.color": "black",
+    "ytick.color": "black",
+    "figure.facecolor": "white",
+    "axes.facecolor": "white",
+    "savefig.facecolor": "white",
+    "savefig.edgecolor": "white",
     # ── Axes ───────────────────────────────────────────────────────
-    "axes.spines.top":          False,
-    "axes.spines.right":        False,
-    "axes.spines.left":         True,
-    "axes.spines.bottom":       True,
-    "axes.linewidth":           0.8,
-    "axes.grid":                False,
-    "axes.axisbelow":           True,
+    "axes.spines.top": False,
+    "axes.spines.right": False,
+    "axes.spines.left": True,
+    "axes.spines.bottom": True,
+    "axes.linewidth": 0.8,
+    "axes.grid": False,
+    "axes.axisbelow": True,
     # ── Ticks ──────────────────────────────────────────────────────
-    "xtick.direction":          "out",
-    "ytick.direction":          "out",
-    "xtick.major.width":        0.8,
-    "ytick.major.width":        0.8,
-    "xtick.major.size":         3.0,
-    "ytick.major.size":         3.0,
-    "xtick.minor.size":         2.0,
-    "ytick.minor.size":         2.0,
+    "xtick.direction": "out",
+    "ytick.direction": "out",
+    "xtick.major.width": 0.8,
+    "ytick.major.width": 0.8,
+    "xtick.major.size": 3.0,
+    "ytick.major.size": 3.0,
+    "xtick.minor.size": 2.0,
+    "ytick.minor.size": 2.0,
     # ── Lines / markers ────────────────────────────────────────────
-    "lines.linewidth":          1.2,
-    "lines.markersize":         4,
+    "lines.linewidth": 1.2,
+    "lines.markersize": 4,
     # ── Legend ─────────────────────────────────────────────────────
-    "legend.frameon":           False,
-    "legend.borderpad":         0.3,
-    "legend.labelspacing":      0.3,
-    "legend.handlelength":      1.5,
-    "legend.handletextpad":     0.4,
+    "legend.frameon": False,
+    "legend.borderpad": 0.3,
+    "legend.labelspacing": 0.3,
+    "legend.handlelength": 1.5,
+    "legend.handletextpad": 0.4,
     # ── Figure ─────────────────────────────────────────────────────
     # 6.5 × 4 in = ~double-column width; scale panels up/down per figure.
-    "figure.figsize":           [6.5, 4.0],
-    "figure.dpi":               120,        # screen preview
+    "figure.figsize": [6.5, 4.0],
+    "figure.dpi": 120,  # screen preview
     "figure.constrained_layout.use": True,  # disable per-figure for colorbar+tight_layout
     # ── Save ───────────────────────────────────────────────────────
-    "savefig.dpi":              300,        # print / journal submission
-    "savefig.format":           "pdf",      # vector; switch to png for raster-heavy figures
-    "savefig.bbox":             "tight",
-    "savefig.pad_inches":       0.05,
-    "savefig.transparent":      False,
+    "savefig.dpi": 300,  # print / journal submission
+    "savefig.format": "pdf",  # vector; switch to png for raster-heavy figures
+    "savefig.bbox": "tight",
+    "savefig.pad_inches": 0.05,
+    "savefig.transparent": False,
     # PDF/PS text editable in Illustrator and Inkscape
-    "pdf.fonttype":             42,
-    "ps.fonttype":              42,
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
 }
 
 
@@ -111,6 +114,9 @@ def apply_style(constrained_layout: bool = True) -> None:
     import matplotlib.pyplot as plt
     from cycler import cycler
 
-    plt.rcParams.update(_BASE)
+    # matplotlib's RcParams.update() is typed against a closed Literal of every known
+    # rcParam name; _BASE's keys are all valid rcParams names but typed as plain `str`,
+    # so the stub sees a structural mismatch rather than a real one.
+    plt.rcParams.update(_BASE)  # type: ignore[arg-type]
     plt.rcParams["axes.prop_cycle"] = cycler("color", WONG)
     plt.rcParams["figure.constrained_layout.use"] = constrained_layout

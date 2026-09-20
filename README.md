@@ -8,6 +8,7 @@ single-cell ATAC data.
 ```bash
 pip install -e .                    # normal case
 pip install -e . --no-deps          # inside a mamba-solved prefix
+pip install git+https://github.com/mikecuoco/scads_drvi.git
 ```
 
 `--no-deps` matters in a conda/mamba environment: letting pip re-resolve `numpy`/`torch`
@@ -19,6 +20,16 @@ The S-LDSC dependency (`ldsc-rs`, from
 built from source by `maturin` when you `pip install`, which needs a Rust ≥1.85
 toolchain available first (e.g. `micromamba install rust maturin` on a machine with
 no system Rust).
+
+## Development
+
+```bash
+pip install -e '.[dev,test]'
+prek run --all-files   # ruff check --fix, ruff format, mypy src
+```
+
+`prek install` wires the same checks into a git pre-commit hook, run automatically on
+`git commit`.
 
 ## Getting started
 

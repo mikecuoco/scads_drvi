@@ -14,7 +14,7 @@ smaller and less work.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO
 
 import numpy as np
 
@@ -38,7 +38,7 @@ def read_fai(path: str | Path) -> dict[str, tuple[int, int, int, int]]:
 
 
 def _contig_counts(
-    fh, meta: tuple[int, int, int, int], starts: np.ndarray, ends: np.ndarray
+    fh: BinaryIO, meta: tuple[int, int, int, int], starts: np.ndarray, ends: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
     """Per-region ``(n_GC, n_ACGT)`` for one contig, in one sequential read."""
     length, offset, line_bases, line_width = meta
@@ -63,7 +63,8 @@ def _contig_counts(
             continue
         flat = np.repeat(ss[keep], ww[keep]) + (
             np.arange(ww[keep].sum(), dtype=np.int64)
-            - np.repeat(np.concatenate([[0], np.cumsum(ww[keep])[:-1]]), ww[keep]))
+            - np.repeat(np.concatenate([[0], np.cumsum(ww[keep])[:-1]]), ww[keep])
+        )
         b = up[flat]
         gcb = (b == 71) | (b == 67)
         acgtb = gcb | (b == 65) | (b == 84)

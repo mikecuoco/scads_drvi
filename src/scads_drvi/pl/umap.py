@@ -23,13 +23,15 @@ figure it returns, same as any other figure in this package.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
     from anndata import AnnData
+    from matplotlib.axes import Axes
+    from matplotlib.colors import Colormap
     from matplotlib.figure import Figure
 
 __all__ = [
@@ -92,9 +94,17 @@ def _subsample_embed(embed: AnnData, n: int | None, *, seed: int = SUBSAMPLE_SEE
     (or ``sc.pl.umap``) already handles point sizing, a stable per-category palette and
     a colorbar on its own; call it directly rather than through a wrapper here.
     """
+    import pandas as pd
+
     if n is None:
         return embed.copy()
-    positions = subsample(embed.obs.reset_index(drop=True), n, seed=seed).index.to_numpy()
+    obs = embed.obs
+    if not isinstance(obs, pd.DataFrame):
+        raise TypeError(
+            f"{type(embed).__name__}.obs must be a pandas DataFrame; this function does "
+            "not support a lazy/backed .obs (e.g. scvi-tools' Dataset2D)."
+        )
+    positions = subsample(obs.reset_index(drop=True), n, seed=seed).index.to_numpy()
     return embed[positions].copy()
 
 
@@ -107,14 +117,14 @@ def latent_umap_grid(
     order_col: str = "order",
     title_col: str = "title",
     ncols: int = 5,
-    cmap=None,
-    directional_cmap=None,
+    cmap: Colormap | str | None = None,
+    directional_cmap: Colormap | str | None = None,
     min_max_thresholds: tuple[float, float] | None = (-1.0, 1.0),
     color_bar_rescale_ratio: float = 1.0,
     rearrange_titles: bool = True,
     n: int | None = SUBSAMPLE_DEFAULT,
     seed: int = SUBSAMPLE_SEED,
-    **kwargs,
+    **kwargs: Any,
 ) -> Figure:
     """One embedding panel per latent dimension, ported to match
     ``drvi.utils.pl.plot_latent_dims_in_umap``'s own mechanics exactly: DRVI's
@@ -136,8 +146,10 @@ def latent_umap_grid(
     throughout), not `title_col` values as DRVI's own `dim_subset` does.
     """
     import anndata as ad
+    import pandas as pd
     import scanpy as sc
     from matplotlib.ticker import FuncFormatter
+    from scipy.sparse import _base as sparse_base
 
     from scads_drvi.pl.color import SATURATED_RED_BLUE_CMAP, SATURATED_SKY_CMAP
 
@@ -151,6 +163,11 @@ def latent_umap_grid(
         raise KeyError('"vanished" is not a column of embed.var')
 
     dim_stats = embed.var
+    if not isinstance(dim_stats, pd.DataFrame):
+        raise TypeError(
+            f"{type(embed).__name__}.var must be a pandas DataFrame; this function does "
+            "not support a lazy/backed .var (e.g. scvi-tools' Dataset2D)."
+        )
     if remove_vanished:
         dim_stats = dim_stats.loc[~dim_stats["vanished"].astype(bool)]
     dim_stats = dim_stats.sort_values(order_col)
@@ -172,13 +189,26 @@ def latent_umap_grid(
 
     if directional:
         pos, neg = plotted.copy(), plotted.copy()
-        neg.X = -neg.X
-        neg.var["min"], neg.var["max"] = -neg.var["max"], -neg.var["min"]
-        pos.var["_direction"], neg.var["_direction"] = "+", "-"
-        pos.var[title_col] = pos.var[title_col].astype(str) + "+"
-        neg.var[title_col] = neg.var[title_col].astype(str) + "-"
-        pos.var[order_col] = pos.var[order_col] + 1e-8
-        neg.var[order_col] = neg.var[order_col] - 1e-8
+        pos_var, neg_var = pos.var, neg.var
+        if not isinstance(pos_var, pd.DataFrame) or not isinstance(neg_var, pd.DataFrame):
+            raise TypeError(
+                "latent_umap_grid's directional split needs an in-memory AnnData "
+                "(pandas .var); a lazy/backed .var (e.g. scvi-tools' Dataset2D) is not "
+                "supported here."
+            )
+        neg_x = neg.X
+        if not isinstance(neg_x, np.ndarray | sparse_base._spbase):
+            raise TypeError(
+                "latent_umap_grid's directional split needs an in-memory ndarray or "
+                f"scipy sparse embed.X; got {type(neg_x).__name__}."
+            )
+        neg.X = -neg_x
+        neg_var["min"], neg_var["max"] = -neg_var["max"], -neg_var["min"]
+        pos_var["_direction"], neg_var["_direction"] = "+", "-"
+        pos_var[title_col] = pos_var[title_col].astype(str) + "+"
+        neg_var[title_col] = neg_var[title_col].astype(str) + "-"
+        pos_var[order_col] = pos_var[order_col] + 1e-8
+        neg_var[order_col] = neg_var[order_col] - 1e-8
         # dim_0..dim_{K-1} would otherwise appear twice (once negated) going into the
         # concat below -- rename to unique ids first so ad.concat doesn't warn about
         # duplicate var_names for the moment before the final reset below.
@@ -192,7 +222,13 @@ def latent_umap_grid(
     # `.var`'s own row order need not match -- color=cols_to_show below is an
     # explicit, already-sorted panel list; gene_symbols= resolves each title to its
     # var row regardless of where that row physically sits.
-    tmp_df = plotted.var.sort_values(order_col)
+    plotted_var = plotted.var
+    if not isinstance(plotted_var, pd.DataFrame):
+        raise TypeError(
+            "latent_umap_grid needs an in-memory AnnData (pandas .var); a lazy/backed "
+            ".var (e.g. scvi-tools' Dataset2D) is not supported here."
+        )
+    tmp_df = plotted_var.sort_values(order_col)
     cols_to_show = list(tmp_df[title_col])
 
     if min_max_thresholds is not None:
@@ -202,15 +238,24 @@ def latent_umap_grid(
         vmin = list(tmp_df["min"].to_numpy(dtype=float))
         vmax = list(tmp_df["max"].to_numpy(dtype=float))
 
-    fig = sc.pl.umap(
-        plotted, gene_symbols=title_col, color=cols_to_show, return_fig=True,
-        frameon=False, cmap=directional_cmap if directional else cmap,
-        vmin=vmin, vcenter=0, vmax=vmax, ncols=ncols, show=False, **kwargs,
+    fig: Figure = sc.pl.umap(
+        plotted,
+        gene_symbols=title_col,
+        color=cols_to_show,
+        return_fig=True,
+        frameon=False,
+        cmap=directional_cmap if directional else cmap,
+        vmin=vmin,
+        vcenter=0,
+        vmax=vmax,
+        ncols=ncols,
+        show=False,
+        **kwargs,
     )
     for i, ax in enumerate(fig.axes[1 : 2 * len(tmp_df) : 2]):
         pos_ax = ax.get_position()
         ax.set_position(
-            [pos_ax.x0, pos_ax.y0, pos_ax.width, pos_ax.height * color_bar_rescale_ratio]
+            (pos_ax.x0, pos_ax.y0, pos_ax.width, pos_ax.height * color_bar_rescale_ratio)
         )
         if directional and tmp_df["_direction"].iloc[i] == "-":
             ax.invert_yaxis()
@@ -220,7 +265,7 @@ def latent_umap_grid(
             # current (pre-autoscale) ticks produces a degenerate axis transform at
             # draw time. A formatter defers both the "all ticks are whole numbers"
             # check and the negation to draw time instead, once ticks are final.
-            def _negate_ticklabel(x, _pos, ax=ax):
+            def _negate_ticklabel(x: float, _pos: float | None, ax: Axes = ax) -> str:
                 ticks = ax.get_yticks()
                 if all(float(t).is_integer() for t in ticks):
                     return str(int(-x))
@@ -230,8 +275,14 @@ def latent_umap_grid(
     if rearrange_titles:
         for ax in fig.axes:
             ax.text(
-                0.935, 0.05, ax.get_title(), size=15, ha="left", color="black",
-                rotation=90, transform=ax.transAxes,
+                0.935,
+                0.05,
+                ax.get_title(),
+                size=15,
+                ha="left",
+                color="black",
+                rotation=90,
+                transform=ax.transAxes,
             )
             ax.set_title("")
 

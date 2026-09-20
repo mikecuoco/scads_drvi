@@ -17,9 +17,13 @@ tests/test_import_surface.py records the exemption.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:  # pragma: no cover
+    from anndata import AnnData
 
 # `log` is re-exported: enrichment scripts import it here.
 from scads_drvi._util.progress import log_out as log  # noqa: F401  (re-exported)
@@ -144,7 +148,7 @@ def kept_dims(fmap: pd.DataFrame) -> list[str]:
 # written with plain anndata calls at the call site (see the getting-started guide)
 # ---------------------------------------------------------------------------
 
-def kept_loadings(embed, fmap: pd.DataFrame):
+def kept_loadings(embed: AnnData, fmap: pd.DataFrame) -> pd.DataFrame:
     """cells x kept-dims, straight from a result h5ad's signed ``X`` -- no ReLU.
 
     A caller that needs one direction's non-negative loadings (for S-LDSC's top-frac
@@ -156,19 +160,21 @@ def kept_loadings(embed, fmap: pd.DataFrame):
     import pandas as pd
 
     keep = kept_dims(fmap)
-    frame = pd.DataFrame(embed[:, keep].X, index=embed.obs_names, columns=keep)
+    # embed.X is typed as a broad ndarray/sparse/backed union; this module's own
+    # docstring is explicit that it's reachable only from an in-memory, dense fit.
+    X = cast(np.ndarray, embed[:, keep].X)
+    frame = pd.DataFrame(X, index=embed.obs_names, columns=keep)
     return frame
 
 
-def kept_feature_loadings(feature_loadings, fmap: pd.DataFrame):
+def kept_feature_loadings(feature_loadings: AnnData, fmap: pd.DataFrame) -> pd.DataFrame:
     """peaks x kept-dims, from the companion loadings h5ad (however it was saved and
     loaded, e.g. plain ``anndata.read_h5ad``)."""
     import pandas as pd
 
     keep = kept_dims(fmap)
-    frame = pd.DataFrame(
-        feature_loadings[:, keep].X, index=feature_loadings.obs_names, columns=keep
-    )
+    X = cast(np.ndarray, feature_loadings[:, keep].X)
+    frame = pd.DataFrame(X, index=feature_loadings.obs_names, columns=keep)
     return frame
 
 
