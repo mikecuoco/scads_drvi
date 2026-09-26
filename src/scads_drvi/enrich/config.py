@@ -96,20 +96,32 @@ def select_factors(
 
     vanished_col = _as_bool(stats["vanished"])
 
-    # The loadings are a ReLU of the latent (positive side only) and the factors
-    # are the positive OOD log-fold-change, so `vanished_positive_direction` is
-    # strictly the flag that matches the contract. On both current fits it
-    # agrees with `vanished` on every dimension; say so loudly if that ever
-    # stops being true rather than quietly picking one.
+    # DRVI derives both of these from the signed latent: `vanished` is
+    # `|X|.max(over cells) < threshold` and `vanished_positive_direction` is
+    # `X.max(...) < threshold`. So `vanished` is exactly
+    # (`vanished_positive_direction` and `vanished_negative_direction`), which
+    # means these two columns can only ever disagree one way -- a dimension live
+    # in the negative direction alone.
+    #
+    # Which flag is the right one is a property of the *caller*, not of the fit,
+    # so report the condition rather than prescribing a fix. A positive-only
+    # consumer (loadings ReLU'd to the positive side, factors read as the positive
+    # OOD log-fold-change) should treat such a dimension as vanished. A
+    # direction-aware consumer -- one that scores `_pos` and `_neg` separately,
+    # the way the S-LDSC sweep does -- should keep it and use only its negative
+    # direction. `select_factors` filters on `vanished`, so it keeps it either
+    # way; a positive-only caller that wants it dropped should pass it via
+    # `exclude_dims`.
     pos_col = "vanished_positive_direction"
     if pos_col in stats.columns:
         pos_vanished_col = _as_bool(stats[pos_col])
         disagree = stats.index[vanished_col != pos_vanished_col].tolist()
         if disagree:
             log(
-                f"WARNING: `vanished` and `{pos_col}` disagree on {disagree}. "
-                "The contract's loadings are a ReLU, so the positive-direction "
-                "flag is the relevant one -- review before trusting this run."
+                f"NOTE: {disagree} are live in the negative direction only "
+                f"(`vanished` and `{pos_col}` disagree). Kept, since `vanished` "
+                "governs selection. Positive-only consumers should drop them; "
+                "direction-aware consumers should use their negative direction."
             )
 
     rows = []
