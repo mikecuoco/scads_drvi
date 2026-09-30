@@ -25,15 +25,9 @@ htmlcov/
 docs/tutorials/.snakemake/
 /.snakemake/
 
-# pbmc.ipynb tutorial: large/raw/regeneratable data prepare_data.py (re)produces
-docs/tutorials/data/pbmc_multiome_filtered_feature_bc_matrix.h5
-docs/tutorials/data/pbmc_rna.h5ad
-docs/tutorials/data/pbmc_atac.h5ad
-docs/tutorials/data/pbmc_model_gpu/
-docs/tutorials/data/ldsc_reference/
-docs/tutorials/data/sumstats/
-docs/tutorials/data/enrich_work_gpu/
-docs/tutorials/data/gene_annotation/
+# pbmc.ipynb tutorial data: all regeneratable, none of it belongs in git (purged
+# from history 2026-09-30).
+docs/tutorials/data/
 
 # Editors, OS
 .vscode/
