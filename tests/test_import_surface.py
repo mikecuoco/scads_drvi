@@ -34,10 +34,12 @@ import pytest
 CORE_MODULES = [
     "scads_drvi",
     "scads_drvi.stats",
+    "scads_drvi.specificity",
     "scads_drvi.scores.cell",
     "scads_drvi.scores.aggregate",
     "scads_drvi.enrich.ldsc",
     "scads_drvi.enrich.annotations",
+    "scads_drvi.enrich.risk",
     "scads_drvi.annotate.gc",
     "scads_drvi.annotate.motif",
     "scads_drvi.annotate.resources",

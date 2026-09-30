@@ -19,6 +19,12 @@ htmlcov/
 # The pinned LDSC binary, when the default cache lands in-tree
 .ldsc-cache/
 
+# Snakemake's own run metadata -- most of it lands under workflow/Snakefile's own
+# workdir: (docs/tutorials/), but its top-level CLI log lands at the invocation
+# directory (the repo root) regardless of workdir:.
+docs/tutorials/.snakemake/
+/.snakemake/
+
 # pbmc.ipynb tutorial: large/raw/regeneratable data prepare_data.py (re)produces
 docs/tutorials/data/pbmc_multiome_filtered_feature_bc_matrix.h5
 docs/tutorials/data/pbmc_rna.h5ad
@@ -27,6 +33,7 @@ docs/tutorials/data/pbmc_model_gpu/
 docs/tutorials/data/ldsc_reference/
 docs/tutorials/data/sumstats/
 docs/tutorials/data/enrich_work_gpu/
+docs/tutorials/data/gene_annotation/
 
 # Editors, OS
 .vscode/

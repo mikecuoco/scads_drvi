@@ -64,6 +64,10 @@ drvi = ["scvi-tools>=1.5", "torch>=2.4", "drvi-py>=0.2.7"]
 # annotate.llm imports it function-locally, so the base install stays light for
 # callers who never call into that one module.
 llm = ["anthropic>=0.40"]
+# pbmc.ipynb's own per-factor Manhattan plots (Section 3c) -- a real Manhattan-plot
+# package for genome-wide chromosome layout/styling, not reimplemented by hand. Not
+# imported anywhere in src/scads_drvi itself.
+tutorial = ["qmplot>=0.3"]
 docs = [
     "sphinx>=7.3",
     "sphinx-book-theme>=1.1",

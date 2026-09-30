@@ -31,6 +31,7 @@ __all__ = [
     "covariate_audit",
     "score_by_group",
     "grouped_landscape",
+    "risk_manhattan",
 ]
 
 Z_COLUMN = "Coefficient_z-score"
@@ -323,12 +324,15 @@ def grouped_landscape(
     gamma: float = 1.0,
     cmap: str = "magma",
     masked_color: str = "#C2CCD6",
+    grey_caption: str = "below the count threshold",
 ) -> tuple[Figure, Axes]:
     """Heatmap of a value over two groupings, with thin bins visibly masked.
 
     Masked bins are drawn in a distinct cool grey, and the colourbar label says so: grey
     means "no reliable value", not "measured, and low". `blocks` draws alternating
     background bands for a blocked row axis (see ``scores.aggregate.block_order``).
+    `grey_caption` names *why* a cell is grey for a caller whose masking reason isn't a
+    count threshold (e.g. :func:`signal_capture_landscape`'s "no overlapping peak").
     """
     import matplotlib.pyplot as plt
     from matplotlib import colormaps
@@ -373,5 +377,98 @@ def grouped_landscape(
         )
 
     bar = fig.colorbar(image, ax=ax, pad=0.02, fraction=0.03)
-    bar.set_label(f"{value_label}\n(grey: below the count threshold)")
+    bar.set_label(f"{value_label}\n(grey: {grey_caption})")
+    return fig, ax
+
+
+def _chrom_sort_key(chrom: str) -> tuple[int, str]:
+    """Numeric chromosomes first, in numeric order; anything else after, alphabetic.
+
+    No hardcoded assembly table -- this package makes no organism/build assumption
+    (see `tests/test_portability.py`), so chromosome order is derived from whichever
+    labels are actually present, not looked up.
+    """
+    bare = chrom[3:] if chrom.lower().startswith("chr") else chrom
+    return (0, f"{int(bare):09d}") if bare.isdigit() else (1, bare)
+
+
+def risk_manhattan(
+    risk: pd.DataFrame,
+    *,
+    value_col: str = "risk_total",
+    dim_subset: Sequence[str] | None = None,
+    titles: Mapping[str, str] | None = None,
+    s: float = 8.0,
+) -> tuple[Figure, Axes]:
+    """Genome-wide scatter of peak-level risk (:func:`scads_drvi.enrich.risk.peak_risk`'s
+    output) -- position on x, `value_col` on y.
+
+    Default view (`dim_subset=None`): one point per peak, its highest `value_col`
+    across every `(dim, direction)` row that mentions it -- the peak-resolution
+    analogue of picking a signal's single top-capturing factor -- coloured by *which*
+    factor that is. `dim_subset` shows every row for those specific factors instead
+    (still one point per `(peak, dim, direction)`), e.g. to look at one factor's own
+    risk track alone rather than the genome-wide maximum.
+
+    X position is a running genomic offset built from `risk`'s own `chrom`/`start`/
+    `end` columns, chromosomes ordered numerically then alphabetically
+    (:func:`_chrom_sort_key`) -- not a hardcoded assembly length table, so a
+    chromosome's span here is only as wide as the peaks actually plotted make it, not
+    its real length.
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    from scads_drvi.pl.color import categorical_palette
+
+    for column in ("peak", "chrom", "start", "dim", "direction", value_col):
+        if column not in risk.columns:
+            raise KeyError(f"{column!r} not in risk; run enrich.risk.peak_risk first")
+
+    frame = risk if dim_subset is None else risk[risk["dim"].isin(dim_subset)]
+    if frame.empty:
+        raise ValueError(
+            "no rows to plot"
+            if dim_subset is None
+            else f"no rows for dim_subset={list(dim_subset)!r}"
+        )
+
+    if dim_subset is None:
+        frame = frame.loc[frame.groupby("peak")[value_col].idxmax()]
+
+    end_col = "end" if "end" in frame.columns else "start"
+    chroms = sorted(frame["chrom"].astype(str).unique(), key=_chrom_sort_key)
+    offsets: dict[str, int] = {}
+    running = 0
+    for chrom in chroms:
+        offsets[chrom] = running
+        running += int(frame.loc[frame["chrom"] == chrom, end_col].max()) + 1
+
+    x = frame["chrom"].astype(str).map(offsets).to_numpy() + frame["start"].to_numpy()
+    y = frame[value_col].to_numpy(dtype=float)
+
+    titled = (lambda dim: titles.get(dim, dim)) if titles is not None else (lambda dim: dim)
+    palette = categorical_palette(frame["dim"].astype(str).tolist())
+    colors = frame["dim"].astype(str).map(palette)
+
+    fig, ax = plt.subplots(figsize=(max(9.0, 0.4 * len(chroms)), 3.6))
+    ax.scatter(x, y, c=colors, s=s, linewidths=0)
+    ax.set_xticks(
+        [offsets[c] + frame.loc[frame["chrom"] == c, "start"].median() for c in chroms]
+    )
+    ax.set_xticklabels(chroms, rotation=90, fontsize=7)
+    ax.set_xlabel("genomic position")
+    ax.set_ylabel(value_col)
+
+    handles = [
+        Line2D([0], [0], marker="o", linestyle="", color=color, label=titled(dim))
+        for dim, color in palette.items()
+    ]
+    ax.legend(
+        handles=handles,
+        frameon=False,
+        fontsize=6,
+        loc="upper left",
+        ncol=max(1, len(handles) // 12),
+    )
     return fig, ax

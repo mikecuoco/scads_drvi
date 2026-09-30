@@ -20,6 +20,7 @@ from scads_drvi.pl.enrichment import (  # noqa: E402
     covariate_audit,
     grouped_landscape,
     heritability_landscape,
+    risk_manhattan,
     score_by_group,
     trait_concordance,
 )
@@ -288,6 +289,57 @@ class TestEnrichmentFigures:
             grouped_landscape(
                 means, pd.DataFrame(np.zeros((3, 2))), row_label="r", column_label="c"
             )
+
+    @pytest.fixture
+    def risk(self):
+        return pd.DataFrame(
+            {
+                "peak": ["chr1:100-200", "chr1:300-400", "chr2:100-200", "chr2:300-400"],
+                "chrom": ["chr1", "chr1", "chr2", "chr2"],
+                "start": [100, 300, 100, 300],
+                "end": [200, 400, 200, 400],
+                "dim": ["dim_0", "dim_1", "dim_0", "dim_1"],
+                "direction": ["pos", "pos", "neg", "neg"],
+                "loading": [0.5, 0.2, 0.3, 0.9],
+                "tau": [2.0, 1.0, 1.0, 1.0],
+                "risk_rate": [1.0, 0.2, 0.3, 0.9],
+                "risk_total": [3.0, 0.4, 0.6, 2.7],
+            }
+        )
+
+    def test_risk_manhattan_one_point_per_peak_by_default(self, risk):
+        fig, ax = risk_manhattan(risk)
+        assert isinstance(fig, Figure)
+        assert len(ax.collections[0].get_offsets()) == risk["peak"].nunique()
+
+    def test_risk_manhattan_dim_subset_keeps_every_row(self, risk):
+        _, ax = risk_manhattan(risk, dim_subset=["dim_0"])
+        expected = (risk["dim"] == "dim_0").sum()
+        assert len(ax.collections[0].get_offsets()) == expected
+
+    def test_risk_manhattan_unknown_dim_subset_is_refused(self, risk):
+        with pytest.raises(ValueError, match="dim_subset"):
+            risk_manhattan(risk, dim_subset=["not_a_dim"])
+
+    def test_risk_manhattan_needs_risk_columns(self):
+        with pytest.raises(KeyError, match="chrom"):
+            risk_manhattan(pd.DataFrame({"peak": ["a"]}))
+
+    def test_risk_manhattan_chrom_order_is_numeric_then_alphabetic(self):
+        frame = pd.DataFrame(
+            {
+                "peak": ["chr10:1-2", "chr2:1-2", "chrX:1-2"],
+                "chrom": ["chr10", "chr2", "chrX"],
+                "start": [1, 1, 1],
+                "end": [2, 2, 2],
+                "dim": ["dim_0"] * 3,
+                "direction": ["pos"] * 3,
+                "risk_total": [1.0, 1.0, 1.0],
+            }
+        )
+        _, ax = risk_manhattan(frame)
+        labels = [t.get_text() for t in ax.get_xticklabels()]
+        assert labels == ["chr2", "chr10", "chrX"]
 
 
 class TestFactorFigures:
