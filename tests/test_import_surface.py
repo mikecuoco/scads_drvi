@@ -34,6 +34,7 @@ import pytest
 CORE_MODULES = [
     "scads_drvi",
     "scads_drvi.stats",
+    "scads_drvi.specificity",
     "scads_drvi.scores.cell",
     "scads_drvi.scores.aggregate",
     "scads_drvi.enrich.ldsc",
