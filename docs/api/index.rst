@@ -7,6 +7,7 @@ API Reference
    :maxdepth: 1
 
    stats
+   specificity
    enrich
    scores
    annotate
