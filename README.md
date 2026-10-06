@@ -15,11 +15,9 @@ pip install git+https://github.com/mikecuoco/scads_drvi.git
 across a solved prefix will break it. Floor: Python 3.12 / numpy 2 / pandas 2.3
 (scanpy's own floor).
 
-The S-LDSC dependency (`ldsc-rs`, from
-[`mikecuoco/ldsc`](https://github.com/mikecuoco/ldsc)) has no PyPI release — it is
-built from source by `maturin` when you `pip install`, which needs a Rust ≥1.85
-toolchain available first (e.g. `micromamba install rust maturin` on a machine with
-no system Rust).
+S-LDSC runs through the external `ldsc.py` CLI
+([CBIIT/ldsc](https://github.com/CBIIT/ldsc), branch `ldsc313`), installed in its own
+environment; it is not a dependency of this package.
 
 ## Development
 
@@ -88,23 +86,25 @@ recorded it (e.g. your own `provenance` dict).
 
 ### 2. Enrich (S-LDSC)
 
-S-LDSC itself runs through [`mikecuoco/ldsc`](https://github.com/mikecuoco/ldsc)'s
-Python bindings (`ldsc-rs`, a declared dependency built from source with `maturin` --
-this needs a Rust ≥1.85 toolchain available when you `pip install`, e.g.
-`micromamba install rust maturin` first on a machine with no system Rust).
+S-LDSC itself runs through the `ldsc.py` CLI from
+[CBIIT/ldsc](https://github.com/CBIIT/ldsc) (a Python 3 port of bulik/ldsc; branch
+`ldsc313`). It is not a dependency of this package: install it in its own environment,
+since its `setup.py` pins exact numpy/pandas/scipy versions --
+`pip install git+https://github.com/CBIIT/ldsc.git@ldsc313`.
 
 Starting from the `embed` written above: `select_factors` reads the `vanished` flags
 `set_latent_dimension_stats` already wrote onto `embed.var` and decides which
 dimensions get enriched, under which `k` index. Each kept dimension's non-negative
 loadings (`np.clip(embed.X, 0, None)`, one column per `keep`) become a per-SNP
 annotation, written thin (bare annotation column, no `CHR SNP BP CM`) since
-`ldsc_rs` accepts that shape directly, then run through `estimate_ldscore`/`estimate_h2`
-directly — no wrapper class, this package has no dedicated sweep object:
+`ldsc.py --l2 --thin-annot` accepts that shape directly, then run through
+`ldsc.py --l2`/`--h2` — no wrapper class, this package has no dedicated sweep object:
 
 ```python
+import subprocess
+
 import numpy as np
 import pandas as pd
-from ldsc_rs import estimate_h2, estimate_ldscore
 
 from scads_drvi.enrich.annotations import read_bim
 from scads_drvi.enrich.config import kept_dims, select_factors
@@ -120,20 +120,19 @@ loadings = np.clip(embed[:, keep].X, 0, None)   # relu -- annotation weights are
 for annot, dim in annot2dim.items():
     thin = ...  # bim-ordered per-SNP annotation derived from loadings[:, keep.index(dim)]
     pd.DataFrame({annot: thin}).to_csv(f"annot/{annot}.1.annot.gz", sep="\t", index=False)
-    # thin_annot=True accepts that shape directly; out= writes .l2.ldscore.gz/.M/.M_5_50
-    # (sketch=200, snp_level_masking=True for speed; pass sketch=None,
-    # snp_level_masking=False for the exact per-SNP path instead).
-    estimate_ldscore(
-        "1000G.EUR.QC.1", annot=f"annot/{annot}.1.annot.gz", thin_annot=True,
-        out=f"ld/{annot}.1", window=("cm", 1.0), sketch=200, snp_level_masking=True,
-    )
-    # out=/print_coefficients=True writes results/trait/{annot}.results, in the same
-    # format ldsc's own CLI would have.
-    estimate_h2(
-        "trait.sumstats.gz", ref_ld_chr=f"ld/{annot}.", w_ld_chr="weights.",
-        overlap_annot=True, frqfile_chr="1000G.EUR.QC.", out=f"results/trait/{annot}",
-        print_coefficients=True,
-    )
+    # --thin-annot accepts that shape directly; --out writes .l2.ldscore.gz/.M/.M_5_50.
+    # --annot takes the full file name.
+    subprocess.run([
+        "ldsc.py", "--l2", "--bfile", "1000G.EUR.QC.1",
+        "--annot", f"annot/{annot}.1.annot.gz", "--thin-annot",
+        "--ld-wind-cm", "1.0", "--out", f"ld/{annot}.1",
+    ], check=True)
+    # --print-coefficients writes results/trait/{annot}.results.
+    subprocess.run([
+        "ldsc.py", "--h2", "trait.sumstats.gz", "--ref-ld-chr", f"ld/{annot}.",
+        "--w-ld-chr", "weights.", "--overlap-annot", "--frqfile-chr", "1000G.EUR.QC.",
+        "--print-coefficients", "--out", f"results/trait/{annot}",
+    ], check=True)
 
 results = read_results("results", traits=["trait"], annot2dim=annot2dim)
 embed.uns.setdefault("enrich", {})["my_arm"] = {

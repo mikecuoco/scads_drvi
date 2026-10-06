@@ -126,20 +126,19 @@ embed.obsm["X_umap"]           # the embedding, if one was attached
 ## Running S-LDSC enrichment
 
 S-LDSC has no DRVI equivalent, so this package still runs it and reads its output. It
-is provided by [`mikecuoco/ldsc`](https://github.com/mikecuoco/ldsc)'s Python
-bindings (`ldsc-rs`, a declared dependency), not the Python original. `ldsc-rs` has
-no PyPI release — it is built from source by `maturin`, which needs a Rust ≥1.85
-toolchain available at install time (e.g. `micromamba install rust maturin` first on
-a machine with no system Rust).
+runs through the `ldsc.py` CLI from [CBIIT/ldsc](https://github.com/CBIIT/ldsc), a
+Python 3 port of bulik/ldsc (branch `ldsc313`). It is not a dependency of this package:
+install it in its own environment, since its `setup.py` pins exact numpy/pandas/scipy
+versions -- `pip install git+https://github.com/CBIIT/ldsc.git@ldsc313`.
 
 First, select which dimensions get enriched and under which `k` index, and write each
 one's non-negative loadings out as a thin annotation (a bare annotation column, no
-`CHR SNP BP CM` — `ldsc_rs.estimate_ldscore(..., thin_annot=True)` accepts that shape
-directly):
+`CHR SNP BP CM` — `ldsc.py --l2 --thin-annot` accepts that shape directly):
 
 ```python
+import subprocess
+
 import pandas as pd
-from ldsc_rs import estimate_h2, estimate_ldscore
 
 from scads_drvi.enrich.annotations import read_bim
 from scads_drvi.enrich.config import kept_dims, select_factors
@@ -154,20 +153,19 @@ bim = read_bim("1000G.EUR.QC.1.bim")
 for annot, dim in annot2dim.items():
     thin = ...  # peaks -> per-SNP annotation for `dim`, one 0/1+ column, in bim order
     pd.DataFrame({annot: thin}).to_csv(f"annot/{annot}.1.annot.gz", sep="\t", index=False)
-    # thin_annot=True accepts that shape directly; out= writes .l2.ldscore.gz/.M/.M_5_50.
-    # sketch=200, snp_level_masking=True for speed (pass sketch=None,
-    # snp_level_masking=False for the exact per-SNP path instead).
-    estimate_ldscore(
-        "1000G.EUR.QC.1", annot=f"annot/{annot}.1.annot.gz", thin_annot=True,
-        out=f"ld/{annot}.1", window=("cm", 1.0), sketch=200, snp_level_masking=True,
-    )
-    # out=/print_coefficients=True writes results/trait_a/{annot}.results, in the same
-    # format ldsc's own CLI would have.
-    estimate_h2(
-        "trait_a.sumstats.gz", ref_ld_chr=f"ld/{annot}.", w_ld_chr="weights.",
-        overlap_annot=True, frqfile_chr="1000G.EUR.QC.", out=f"results/trait_a/{annot}",
-        print_coefficients=True,
-    )
+    # --thin-annot accepts that shape directly; --out writes .l2.ldscore.gz/.M/.M_5_50.
+    # --annot takes the full file name.
+    subprocess.run([
+        "ldsc.py", "--l2", "--bfile", "1000G.EUR.QC.1",
+        "--annot", f"annot/{annot}.1.annot.gz", "--thin-annot",
+        "--ld-wind-cm", "1.0", "--out", f"ld/{annot}.1",
+    ], check=True)
+    # --print-coefficients writes results/trait_a/{annot}.results.
+    subprocess.run([
+        "ldsc.py", "--h2", "trait_a.sumstats.gz", "--ref-ld-chr", f"ld/{annot}.",
+        "--w-ld-chr", "weights.", "--overlap-annot", "--frqfile-chr", "1000G.EUR.QC.",
+        "--print-coefficients", "--out", f"results/trait_a/{annot}",
+    ], check=True)
 ```
 
 Reading the results back attaches one tidy table, keyed by `dim` and `direction`, into
@@ -190,7 +188,7 @@ arm["results"].query("direction == 'pos' and trait == 'trait_a'")
 
 The loop above is a single-chromosome toy example. A real run is the same loop, over
 dims × directions × chromosomes, plus a baseline reference layered under each
-factor's own annotation in `ref_ld_chr` (`f"ld/{annot}.,{baseline_stem}"`) and an
+factor's own annotation in `--ref-ld-chr` (`f"ld/{annot}.,{baseline_stem}"`) and an
 `if Path(...).exists(): continue` guard on each `.l2.ldscore.gz`/`.results` output so
 re-running only computes what isn't already there — hours, not seconds, so
 resumability matters. There is no dedicated sweep class for this; see

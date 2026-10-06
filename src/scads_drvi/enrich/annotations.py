@@ -1,7 +1,7 @@
 """Reading a PLINK ``.bim`` and aligning its SNPs to genomic features.
 
-`ldsc_rs.estimate_ldscore(..., thin_annot=True)` accepts a thin annotation (bare
-annotation columns, no ``CHR BP SNP CM``) directly -- so all this package needs from
+`ldsc.py --l2 --thin-annot` accepts a thin annotation (bare annotation columns, no
+``CHR BP SNP CM``) directly -- so all this package needs from
 a `.bim` is its row order, since a per-SNP annotation must return one value per `.bim`
 row, in `.bim` order.
 """
@@ -121,7 +121,7 @@ def restrict_to_reference_snps(
     """Rows of `ldscore` (a ``.l2.ldscore.gz``-shaped frame, one row per SNP)
     restricted to `reference_snps`, reordered to match `reference_snps`'s own order.
 
-    `ldsc_rs.estimate_h2(overlap_annot=True)` requires every `ref_ld_chr` stem to cover
+    `ldsc.py --h2 --overlap-annot` requires every `--ref-ld-chr` stem to cover
     identical SNP sets per chromosome. Our own factor's LD scores are computed over the
     full reference panel, while a real baseline's own precomputed scores (e.g.
     baselineLD_v2.2) are restricted to its regression SNP set (HapMap3 minus MHC) --
