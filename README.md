@@ -112,13 +112,13 @@ from scads_drvi.enrich.ldsc import read_results
 
 fmap = select_factors(embed.var, list(embed.var_names))
 keep = kept_dims(fmap)                       # dims that survive vanished-filtering
-annot2dim = {f"k{i + 1}": dim for i, dim in enumerate(keep)}
+annot2factor = {f"k{i + 1}": factor for i, factor in enumerate(keep)}
 
 bim = read_bim("1000G.EUR.QC.1.bim")
 loadings = np.clip(embed[:, keep].X, 0, None)   # relu -- annotation weights are non-negative
 
-for annot, dim in annot2dim.items():
-    thin = ...  # bim-ordered per-SNP annotation derived from loadings[:, keep.index(dim)]
+for annot, factor in annot2factor.items():
+    thin = ...  # bim-ordered per-SNP annotation derived from loadings[:, keep.index(factor)]
     pd.DataFrame({annot: thin}).to_csv(f"annot/{annot}.1.annot.gz", sep="\t", index=False)
     # --thin-annot accepts that shape directly; --out writes .l2.ldscore.gz/.M/.M_5_50.
     # --annot takes the full file name.
@@ -134,11 +134,11 @@ for annot, dim in annot2dim.items():
         "--print-coefficients", "--out", f"results/trait/{annot}",
     ], check=True)
 
-results = read_results("results", traits=["trait"], annot2dim=annot2dim)
+results = read_results("results", traits=["trait"], annot2factor=annot2factor)
 embed.uns.setdefault("enrich", {})["my_arm"] = {
     "results": results, "factor_selection": fmap.drop(columns="annot_index")
 }
-# tidy dim/direction/trait table, one row per (factor, trait), with BH q already attached
+# tidy factor/direction/trait table, one row per (factor, trait), with BH q already attached
 ```
 
 A real run — every kept factor, both loading directions, every chromosome — is the

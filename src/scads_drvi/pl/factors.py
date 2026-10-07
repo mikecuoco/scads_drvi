@@ -519,7 +519,7 @@ def latent_heatmap(
     package's own `enrich`/`scores` modules already use (see the tutorial's Section 3
     and `cs_from_z`). Column identity for `heritability`/`heritability_se`/
     `heritability_q` becomes ``"{dim}+"``/``"{dim}-"`` accordingly (e.g. an LDSC
-    results table's own ``dim`` + ``direction`` columns, both rows per factor, not
+    results table's own ``factor`` + ``direction`` columns, both rows per factor, not
     just one direction pre-selected). Since a ReLU'd split's values are never negative,
     the heatmap itself switches from `cmap` (DRVI's own diverging ``SaturatedRdBu``,
     which would waste half its range on values that never occur) to
@@ -881,7 +881,7 @@ def latent_heatmap_with_heritability(
 
     `heritability` is a per-dim Series indexed like `dim_stats` -- one value per factor,
     already reduced to whichever direction or summary the caller wants (e.g.
-    ``results.query("direction == 'pos'").set_index("dim")["Coefficient_z-score"]``);
+    ``results.query("direction == 'pos'").set_index("factor")["Coefficient_z-score"]``);
     this function never derives it and never resolves a pos/neg split itself. It is
     reindexed to the heatmap's own column order, so the two panels always describe the
     same factors in the same order regardless of what order `heritability`'s index came

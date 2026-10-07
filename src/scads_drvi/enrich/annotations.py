@@ -38,26 +38,60 @@ def read_bim(path: str | Path) -> pd.DataFrame:
     return frame
 
 
-def assign_peaks(bim: pd.DataFrame, peaks_index: Iterable[str]) -> pd.Series:
+def _bare_chrom(chrom: pd.Series) -> pd.Series:
+    """`chrom` as strings with any leading ``chr``/``Chr``/``CHR`` removed."""
+    return chrom.astype(str).str.replace(r"(?i)^chr", "", regex=True)
+
+
+def _check_disjoint(peaks: pd.DataFrame) -> None:
+    """Raise if any two peaks (cols `chrom`, `start`, `end`) on one chromosome overlap.
+
+    Adjacent peaks (``end == start``) are fine. Vectorised: after sorting by start, a peak
+    overlaps an earlier one exactly when its start is below the running maximum end.
+    """
+    import numpy as np
+
+    ordered = peaks.sort_values(["chrom", "start"], kind="stable")
+    running_end = ordered.groupby("chrom", sort=False)["end"].cummax()
+    previous_end = running_end.groupby(ordered["chrom"], sort=False).shift()
+    bad = np.flatnonzero((ordered["start"] < previous_end).to_numpy())
+    if bad.size:
+        i = int(bad[0])
+        later = ordered.iloc[i]
+        before = ordered.iloc[:i]
+        before = before[(before["chrom"] == later["chrom"]) & (before["end"] > later["start"])]
+        raise ValueError(f"peaks must not overlap: {before.index[0]} and {ordered.index[i]}")
+
+
+def assign_peaks(
+    bim: pd.DataFrame,
+    peaks_index: Iterable[str],
+    coords: pd.DataFrame | None = None,
+) -> pd.Series:
     """The one peak (from `peaks_index`) each `.bim` row falls in, or `pd.NA`.
 
-    Peak coordinates come from :func:`scads_drvi.enrich.config.parse_peaks` applied to
-    `peaks_index`, so a SNP overlaps a peak under that function's half-open
-    ``[start, end)`` convention. `bim` may be a single chromosome (`read_bim`'s own
-    return) or the whole genome concatenated -- either way, a SNP is only ever compared
-    against peaks that share its own `CHR`. A leading ``chr``/``Chr``/``CHR`` is
-    stripped from both `bim`'s `CHR` and each peak's own chromosome before comparing,
-    since PLINK ``.bim`` files use bare chromosome names (``"1"``) while this package's
-    own peak-naming convention carries the prefix (``"chr1:..."``) -- exactly the
-    ``f"chr{chrom}"`` glue every caller of this comparison has had to write by hand.
+    Peaks are 0-based half-open ``[start, end)`` intervals (the BED convention), taken from
+    :func:`scads_drvi.enrich.config.parse_peaks` applied to `peaks_index`, or from `coords`.
+    `.bim` positions are 1-based, so a SNP at `BP` is the interval ``(BP - 1, BP)`` and lies
+    in a peak when ``start < BP <= end``. (Comparing `BP` with ``[start, end)`` directly
+    is off by one at both edges.)
 
-    Vectorized per chromosome (peaks sorted by start, `numpy.searchsorted`), since `bim`
-    here is genome-wide in scale -- millions of rows, not the handful-of-loci case a
-    caller might otherwise expect. A SNP overlapping more than one peak raises: peaks
-    from :func:`scads_drvi.enrich.config.kept_feature_loadings` are assumed
-    non-overlapping, and silently picking one would hide a caller data problem instead
-    of naming it.
+    `coords` (columns `chrom`, `start`, `end`; indexed by peak name) replaces the
+    coordinates parsed from the names -- for peaks lifted to another genome build. A peak
+    whose `start`/`end` are missing is never assigned.
+
+    `bim` may be one chromosome (`read_bim`'s own return) or the whole genome -- a SNP is
+    only compared with peaks on its own `CHR`. A leading ``chr``/``Chr``/``CHR`` is
+    stripped from both sides, since PLINK uses bare names (``"1"``) and peak names carry
+    the prefix (``"chr1:..."``). Peaks on chromosomes absent from `bim` get no SNPs.
+
+    Peaks must not overlap one another: that is checked for the whole peak set (every
+    chromosome, whatever `bim` holds) before the search and raises
+    ``ValueError("peaks must not overlap: a and b")``. The check is global because looking
+    only at neighbours misses nested intervals. A zero-length peak contains no SNP and is
+    left out of the check.
     """
+    import bioframe as bf
     import numpy as np
     import pandas as pd
 
@@ -71,46 +105,27 @@ def assign_peaks(bim: pd.DataFrame, peaks_index: Iterable[str]) -> pd.Series:
     if not peaks_index:
         raise ValueError("no peaks to assign against")
 
-    peaks = parse_peaks(peaks_index)
-    peaks.index = peaks_index
-    peaks["chrom"] = peaks["chrom"].astype(str).str.replace(r"(?i)^chr", "", regex=True)
-    bim_chrom = bim["CHR"].astype(str).str.replace(r"(?i)^chr", "", regex=True)
-    positions = bim["BP"].to_numpy()
+    if coords is None:
+        peaks = parse_peaks(peaks_index)
+        peaks.index = peaks_index
+    else:
+        peaks = coords.loc[peaks_index, ["chrom", "start", "end"]].dropna(subset=["start", "end"])
+    peaks = peaks.astype({"start": "int64", "end": "int64"})
+    peaks["chrom"] = _bare_chrom(peaks["chrom"])
+    snp_chrom = _bare_chrom(bim["CHR"])
+    peaks = peaks[peaks["end"] > peaks["start"]]
+    _check_disjoint(peaks)  # the whole set, so validity does not depend on which `bim` is passed
+    peaks = peaks[peaks["chrom"].isin(set(snp_chrom))]
 
-    matched: list[object] = [pd.NA] * len(bim)
-    for chrom, group in peaks.groupby("chrom", sort=False):
-        rows = np.flatnonzero((bim_chrom == chrom).to_numpy())
-        if rows.size == 0:
-            continue
-
-        order = np.argsort(group["start"].to_numpy())
-        starts = group["start"].to_numpy()[order]
-        ends = group["end"].to_numpy()[order]
-        names = group.index.to_numpy()[order]
-
-        pos = positions[rows]
-        idx = np.searchsorted(starts, pos, side="right") - 1
-        valid = idx >= 0
-        hit = np.zeros(pos.shape, dtype=bool)
-        hit[valid] = pos[valid] < ends[idx[valid]]
-
-        # Peaks are assumed non-overlapping, so at most one candidate should ever
-        # contain `pos` -- check the immediately preceding peak (by start) too, the
-        # only other one that could, to catch a caller's peak set that isn't.
-        left = idx - 1
-        left_valid = left >= 0
-        also_left = np.zeros(pos.shape, dtype=bool)
-        also_left[left_valid] = pos[left_valid] < ends[left[left_valid]]
-        ambiguous = np.flatnonzero(hit & also_left)
-        if ambiguous.size:
-            bad_row = rows[ambiguous[0]]
-            raise ValueError(
-                f"bim row {bad_row} (chrom {chrom!r}, BP {int(positions[bad_row])}) "
-                "overlaps more than one peak -- peaks are assumed non-overlapping."
-            )
-
-        for row, j in zip(rows[hit], idx[hit], strict=True):
-            matched[row] = names[j]
+    matched = np.full(len(bim), pd.NA, dtype=object)
+    if not peaks.empty:
+        bp = bim["BP"].to_numpy(dtype="int64")
+        snps = pd.DataFrame(
+            {"chrom": snp_chrom.to_numpy(), "start": bp - 1, "end": bp, "row": np.arange(len(bim))}
+        )
+        peak_frame = peaks.rename_axis("peak").reset_index()[["chrom", "start", "end", "peak"]]
+        hits = bf.overlap(snps, peak_frame, how="inner", suffixes=("", "_p"))
+        matched[hits["row"].to_numpy()] = hits["peak_p"].to_numpy()
 
     return pd.Series(matched, index=bim.index, name="peak", dtype="object")
 

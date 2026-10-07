@@ -167,13 +167,13 @@ def analysis(tmp_path_factory):
     fmap = select_factors(embed.var, list(embed.var_names))
     keep = kept_dims(fmap)
     assert len(keep) == N_KEPT
-    annot2dim = {f"k{i + 1}": dim for i, dim in enumerate(keep)}
+    annot2factor = {f"k{i + 1}": dim for i, dim in enumerate(keep)}
 
     results_root = root / "results"
     for trait_index, trait in enumerate(TRAITS):
         trait_dir = results_root / trait
         trait_dir.mkdir(parents=True)
-        for slot, annot in enumerate(annot2dim):
+        for slot, annot in enumerate(annot2factor):
             z_score = 4.5 - 0.6 * slot + 0.3 * trait_index
             pd.DataFrame(
                 {
@@ -186,7 +186,7 @@ def analysis(tmp_path_factory):
                 }
             ).to_csv(trait_dir / f"{annot}.results", sep="\t", index=False)
 
-    results = read_results(results_root, traits=TRAITS, annot2dim=annot2dim)
+    results = read_results(results_root, traits=TRAITS, annot2factor=annot2factor)
     embed.uns.setdefault("enrich", {})[ARM] = {
         "results": results,
         "factor_selection": fmap.drop(columns="annot_index"),

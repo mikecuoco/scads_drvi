@@ -6,6 +6,11 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`scores.cell.cs_from_enrichment`: the SCADS enrichment-ratio cell score.**
+  `cs_i = sum_k L_ik a_k e_k / sum_k L_ik a_k` (null 1), for the factors' (shrunk)
+  enrichments `e_k` and annotation sizes `a_k`. Keys can be excluded (SCADS drops
+  annotations under 0.5% of the genome); a cell with no loading on any scored factor is
+  `NaN` and counted in `n_unscored`. Returns `CellScores(kind=SCADS_RATIO)`.
 - **New tutorial: `docs/tutorials/ddp_benchmark.ipynb` trains DRVI under multi-GPU DDP
   and benchmarks it against a single-GPU baseline.** Covers the notebook-safe Lightning
   strategy aliases (`ddp_notebook_find_unused_parameters_true`/`_false`) `DRVI.train`
@@ -22,6 +27,17 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   strategies fork from whichever process calls `.train()`).
 
 ### Changed
+- **Neutral names for a factor: the `dim` column is now `factor` (non-DRVI decompositions
+  have factors, not dims).** `read_results(annot2dim=)` -> `annot2factor=`; the tidy
+  results table and `enrich.risk.peak_risk` output carry a `factor` column;
+  `scores.cell.factor_weights(dims=, dim_column=)` -> `factors=`, `factor_column=`;
+  `CellScores.dims` -> `.factors`; `pl.enrichment.risk_manhattan(dim_subset=)` ->
+  `factor_subset=`. The old keyword names and a legacy `dim` column still work and emit
+  a `DeprecationWarning` (`scads_drvi/_util/compat.py`); passing both spellings is a
+  `TypeError`. DRVI-specific helpers (`select_factors`, `kept_dims`, `latent_heatmap`'s
+  `dim_stats`, `latent_umap_grid`'s `dim_subset`) are unchanged.
+- **`bioframe>=0.7` (was `>=0.6`).** 0.6.0 imports `pkg_resources` and fails to import with
+  current setuptools.
 - **`pl.factors.latent_heatmap` gains optional heritability/cell-score marginal panels
   and a directional split, rather than a second `latent_heatmap_with_heritability`
   (kept, unchanged, for callers without an `embed` `AnnData`).** `heritability`/
@@ -140,6 +156,17 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   h5py and plotting.
 
 ### Fixed
+- **`enrich.annotations.assign_peaks` was off by one at both peak edges, and its overlap
+  check missed nested peaks.** It compared the 1-based `.bim` position with 0-based
+  half-open peaks as `start <= BP < end`; for peak `chr1:100-200` it included BP 100 and
+  dropped BP 200. A SNP at `BP` is the interval `(BP-1, BP)`, now matched with
+  `bioframe.overlap` (`start < BP <= end`). The overlap check compared only the nearest
+  earlier peak, so with A=[100,1000), B=[200,300), C=[400,500) a SNP in A and C went
+  silently to C and a SNP in A alone was dropped. Peaks are now checked for overlap across
+  the whole set before the search and raise `ValueError("peaks must not overlap: a and
+  b")`. On chr22 with the PBMC peaks lifted to hg19, 3 of 1,773 assigned SNPs change, all
+  at `BP == end`. `peak_snp_counts` and the peak-level risk table shift only at those
+  edges. New optional `coords=` takes peak coordinates on another genome build.
 - `io.h5ad.read_obs` indexed the category table with anndata's raw codes, so a **missing**
   categorical (code `-1`) came back carrying the *last* category's name instead of NaN.
   It was a second, divergent copy of the decode in `io.artifacts.read_obs` — which was

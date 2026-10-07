@@ -9,8 +9,8 @@ recorded which one produced a given column:
 
 ``ScoreKind.SCADS_RATIO``
     ``cs_i = (sum_k L_ik a_k e_k) / (sum_k L_ik a_k)``. A weighted mean enrichment, with
-    empirical-Bayes shrunk enrichments. **Null is 1.** This is what the scoring stage
-    writes to disk.
+    empirical-Bayes shrunk enrichments. **Null is 1.** :func:`cs_from_enrichment` computes
+    it; the workflow's scoring step writes it to disk.
 
 They are not on the same scale and do not share a null, so a plot that draws a reference
 line at 0 for one and 1 for the other is right both times and wrong if the columns are
@@ -20,6 +20,7 @@ rather than from a constant typed next to the axis.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -37,6 +38,7 @@ __all__ = [
     "CellScores",
     "factor_weights",
     "cs_from_z",
+    "cs_from_enrichment",
     "read_cell_scores",
     "compare_scores",
 ]
@@ -69,9 +71,17 @@ class CellScores:
     kind: ScoreKind
     model: str
     trait: str
-    dims: tuple[str, ...] = ()
+    factors: tuple[str, ...] = ()
     weights: np.ndarray | None = field(default=None, repr=False)
     n_unscored: int = 0
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        """Deprecated name of :attr:`factors`."""
+        warnings.warn(
+            "`CellScores.dims` is now `CellScores.factors`", DeprecationWarning, stacklevel=2
+        )
+        return self.factors
 
     @property
     def null(self) -> float:
@@ -98,34 +108,49 @@ class CellScores:
 def factor_weights(
     results: pd.DataFrame,
     *,
-    dims: Iterable[str],
+    factors: Iterable[str] | None = None,
     column: str = "Coefficient_z-score",
     clip_negative: bool = True,
-    dim_column: str = "dim",
+    factor_column: str | None = None,
+    dims: Iterable[str] | None = None,
+    dim_column: str | None = None,
 ) -> np.ndarray:
-    """Weights aligned to `dims`, in that order.
+    """Weights aligned to `factors`, in that order.
 
+    `results` has one row per factor, keyed by `factor_column` (default ``"factor"``).
     `clip_negative` applies ``max(0, z)``: a factor whose annotation carries *less*
     heritability than baseline is evidence against involvement, and letting it subtract
     from a cell's score would let depletion in one factor mask enrichment in another.
+
+    `dims` and `dim_column` are the deprecated old names of `factors` and `factor_column`.
     """
-    dims = list(dims)
+    from scads_drvi._util.compat import renamed_kwarg, with_factor_column
+
+    factors = renamed_kwarg(factors, dims, new="factors", old="dims")
+    if factors is None:
+        raise TypeError("factor_weights() missing required keyword argument: 'factors'")
+    factor_column = renamed_kwarg(
+        factor_column, dim_column, new="factor_column", old="dim_column"
+    ) or "factor"
+    factors = list(factors)
     if column not in results.columns:
         raise KeyError(f"{column!r} not in results; columns are {list(results.columns)}")
-    if dim_column not in results.columns:
-        raise KeyError(f"{dim_column!r} not in results")
+    if factor_column == "factor":
+        results = with_factor_column(results)
+    if factor_column not in results.columns:
+        raise KeyError(f"{factor_column!r} not in results")
 
-    indexed = results.set_index(dim_column)
-    missing = [d for d in dims if d not in indexed.index]
+    indexed = results.set_index(factor_column)
+    missing = [d for d in factors if d not in indexed.index]
     if missing:
         raise KeyError(f"no result row for {len(missing)} requested factor(s), e.g. {missing[:5]}")
     if indexed.index.has_duplicates:
         raise ValueError(
-            f"{dim_column!r} is not unique in results -- did you pass more than one "
+            f"{factor_column!r} is not unique in results -- did you pass more than one "
             f"trait? Filter to one trait before computing weights."
         )
 
-    weights = indexed.loc[dims, column].to_numpy(dtype=float)
+    weights = indexed.loc[factors, column].to_numpy(dtype=float)
     if clip_negative:
         weights = np.maximum(weights, 0.0)
     return weights
@@ -156,24 +181,27 @@ def cs_from_z(
     """
     import pandas as pd
 
+    from scads_drvi._util.compat import with_factor_column
+
     if not isinstance(loadings, pd.DataFrame):
         raise TypeError("loadings must be a DataFrame of cells x factors")
 
-    dims = [d for d in results["dim"].tolist() if d in loadings.columns]
-    if not dims:
+    results = with_factor_column(results)
+    factors = [d for d in results["factor"].tolist() if d in loadings.columns]
+    if not factors:
         raise ValueError(
             "no factor in the results table is a column of the loadings matrix. "
-            f"Results name e.g. {results['dim'].tolist()[:3]}; loadings columns are "
+            f"Results name e.g. {results['factor'].tolist()[:3]}; loadings columns are "
             f"e.g. {list(loadings.columns)[:3]}."
         )
 
-    weights = factor_weights(results, dims=dims, column=column, clip_negative=clip_negative)
+    weights = factor_weights(results, factors=factors, column=column, clip_negative=clip_negative)
 
     n = len(loadings)
     out = np.empty(n, dtype=np.float64)
     step = max(int(chunk_rows), 1)
     for start in range(0, n, step):
-        block = loadings.iloc[start : start + step][dims].to_numpy(dtype=np.float64)
+        block = loadings.iloc[start : start + step][factors].to_numpy(dtype=np.float64)
         out[start : start + step] = block @ weights
 
     values = pd.Series(out, index=loadings.index, name="cs")
@@ -182,9 +210,88 @@ def cs_from_z(
         kind=ScoreKind.Z_WEIGHTED,
         model=model,
         trait=trait,
-        dims=tuple(dims),
+        factors=tuple(factors),
         weights=weights,
-        n_unscored=int(len(results) - len(dims)),
+        n_unscored=int(len(results) - len(factors)),
+    )
+
+
+def cs_from_enrichment(
+    loadings: pd.DataFrame,
+    enrichment: pd.Series,
+    annot_size: pd.Series,
+    *,
+    model: str,
+    trait: str,
+    exclude: Iterable[str] = (),
+    chunk_rows: int = 200_000,
+) -> CellScores:
+    """``cs_i = sum_k L_ik a_k e_k / sum_k L_ik a_k`` -- the SCADS enrichment ratio (null 1).
+
+    The score is a mean of the factors' enrichments `e_k`, weighted by how much of cell
+    i's loading sits on each factor and by how large the factor's annotation is (`a_k`;
+    SCADS's variant count, here the annotation's genome-wide ``.l2.M``). A cell with no
+    loading on any scored factor has no defined score: it is ``NaN`` and counted in
+    ``n_unscored`` (never 0, which would read as "measured, and low").
+
+    `loadings` is cells x keys, where each column is one annotation: for a directional
+    factor pass a ReLU'd view per direction (``np.clip(L, 0, None)`` for ``pos``,
+    ``np.clip(-L, 0, None)`` for ``neg``) as separate columns, named like the keys of
+    `enrichment` and `annot_size` (both indexed by key). Scaling a cell's loadings, or
+    every `annot_size`, by a constant leaves the score unchanged.
+
+    `exclude` names keys that get no weight (SCADS drops annotations covering under 0.5%
+    of the genome, whose S-LDSC error estimates are unreliable). Every other key must
+    have a finite `enrichment` and a positive `annot_size`, or this raises naming them:
+    guessing a weight for a bad estimate would move every cell's score.
+
+    `CellScores.weights` holds the numerator weights ``a_k * e_k`` of the scored keys.
+    Computed in row chunks, as :func:`cs_from_z` is.
+    """
+    import pandas as pd
+
+    if not isinstance(loadings, pd.DataFrame):
+        raise TypeError("loadings must be a DataFrame of cells x keys")
+
+    excluded = set(exclude)
+    keys = [k for k in loadings.columns if k not in excluded]
+    if not keys:
+        raise ValueError("no key is left to score: every loadings column is excluded")
+    for name, series in (("enrichment", enrichment), ("annot_size", annot_size)):
+        missing = [k for k in keys if k not in series.index]
+        if missing:
+            raise KeyError(f"{name} has no value for {len(missing)} key(s), e.g. {missing[:5]}")
+
+    e = enrichment.loc[keys].to_numpy(dtype=np.float64)
+    a = annot_size.loc[keys].to_numpy(dtype=np.float64)
+    bad_e = [k for k, v in zip(keys, e, strict=True) if not np.isfinite(v)]
+    bad_a = [k for k, v in zip(keys, a, strict=True) if not (np.isfinite(v) and v > 0)]
+    if bad_e or bad_a:
+        raise ValueError(
+            f"{len(bad_e)} key(s) have a non-finite enrichment (e.g. {bad_e[:3]}) and "
+            f"{len(bad_a)} have a non-positive annot_size (e.g. {bad_a[:3]}); pass them in "
+            "`exclude` to leave them out of the score"
+        )
+
+    numerator_weights = a * e
+    n = len(loadings)
+    out = np.full(n, np.nan, dtype=np.float64)
+    step = max(int(chunk_rows), 1)
+    for start in range(0, n, step):
+        block = loadings.iloc[start : start + step][keys].to_numpy(dtype=np.float64)
+        denominator = block @ a
+        scored = denominator > 0
+        out[start : start + step][scored] = (block @ numerator_weights)[scored] / denominator[scored]
+
+    values = pd.Series(out, index=loadings.index, name="cs")
+    return CellScores(
+        values=values,
+        kind=ScoreKind.SCADS_RATIO,
+        model=model,
+        trait=trait,
+        factors=tuple(keys),
+        weights=numerator_weights,
+        n_unscored=int(np.isnan(out).sum()),
     )
 
 

@@ -42,7 +42,7 @@ def feature_loadings():
 def results():
     return pd.DataFrame(
         {
-            "dim": ["dim_0", "dim_0", "dim_1", "dim_1"],
+            "factor": ["dim_0", "dim_0", "dim_1", "dim_1"],
             "direction": ["pos", "neg", "pos", "neg"],
             "Coefficient": [2.0, 1.0, -0.5, 3.0],
         }
@@ -61,12 +61,27 @@ class TestPeakSnpCounts:
         assert list(counts.index) == ["1:1000-1100"]
         assert counts.iloc[0] == 0
 
+    def test_edge_snps_follow_one_based_positions(self):
+        # "1:100-200" is 0-based half-open: it covers 1-based positions 101..200, so the SNPs
+        # at 101 and 200 count and the ones at 100 and 201 do not.
+        edge_bim = pd.DataFrame(
+            {
+                "CHR": ["1"] * 4,
+                "SNP": ["a", "b", "c", "d"],
+                "CM": [0.0] * 4,
+                "BP": [100, 101, 200, 201],
+                "A1": ["A"] * 4,
+                "A2": ["G"] * 4,
+            }
+        )
+        assert peak_snp_counts(["1:100-200"], edge_bim).loc["1:100-200"] == 2
+
 
 class TestPeakRisk:
     def test_risk_rate_is_loading_times_tau(self, feature_loadings, results):
         risk = peak_risk(feature_loadings, results)
         row = risk[
-            (risk["peak"] == "1:100-200") & (risk["dim"] == "dim_0") & (risk["direction"] == "pos")
+            (risk["peak"] == "1:100-200") & (risk["factor"] == "dim_0") & (risk["direction"] == "pos")
         ]
         assert row["loading"].iloc[0] == pytest.approx(0.5)
         assert row["tau"].iloc[0] == pytest.approx(2.0)
@@ -76,7 +91,7 @@ class TestPeakRisk:
         counts = peak_snp_counts(["1:100-200", "1:300-400"], bim)
         risk = peak_risk(feature_loadings, results, snp_counts=counts)
         row = risk[
-            (risk["peak"] == "1:300-400") & (risk["dim"] == "dim_0") & (risk["direction"] == "neg")
+            (risk["peak"] == "1:300-400") & (risk["factor"] == "dim_0") & (risk["direction"] == "neg")
         ]
         # loading=0.9, tau=1.0 -> risk_rate=0.9; 3 overlapping SNPs -> risk_total=2.7
         assert row["risk_rate"].iloc[0] == pytest.approx(0.9)
@@ -90,21 +105,21 @@ class TestPeakRisk:
         risk = peak_risk(feature_loadings, results)
         # dim_0/pos has loading 0.0 at "1:300-400" -- must not appear
         hit = risk[
-            (risk["peak"] == "1:300-400") & (risk["dim"] == "dim_0") & (risk["direction"] == "pos")
+            (risk["peak"] == "1:300-400") & (risk["factor"] == "dim_0") & (risk["direction"] == "pos")
         ]
         assert hit.empty
 
     def test_include_zero_keeps_zero_loadings(self, feature_loadings, results):
         risk = peak_risk(feature_loadings, results, include_zero=True)
         hit = risk[
-            (risk["peak"] == "1:300-400") & (risk["dim"] == "dim_0") & (risk["direction"] == "pos")
+            (risk["peak"] == "1:300-400") & (risk["factor"] == "dim_0") & (risk["direction"] == "pos")
         ]
         assert len(hit) == 1
         assert hit["loading"].iloc[0] == 0.0
         assert hit["risk_rate"].iloc[0] == 0.0
 
     def test_missing_fitted_result_raises(self, feature_loadings, results):
-        incomplete = results[~((results["dim"] == "dim_1") & (results["direction"] == "neg"))]
+        incomplete = results[~((results["factor"] == "dim_1") & (results["direction"] == "neg"))]
         with pytest.raises(KeyError, match="dim_1"):
             peak_risk(feature_loadings, incomplete)
 
@@ -117,7 +132,7 @@ class TestPeakRisk:
             peak_risk(all_zero, results)
 
     def test_missing_results_columns_is_named(self, feature_loadings):
-        bare = pd.DataFrame({"dim": ["dim_0"], "direction": ["pos"]})
+        bare = pd.DataFrame({"factor": ["dim_0"], "direction": ["pos"]})
         with pytest.raises(KeyError, match="Coefficient"):
             peak_risk(feature_loadings, bare)
 
@@ -141,3 +156,12 @@ class TestTopRiskPeaks:
         risk = peak_risk(feature_loadings, results)  # no snp_counts -> no risk_total
         with pytest.raises(KeyError, match="risk_total"):
             top_risk_peaks(risk)
+
+
+class TestLegacyDimColumn:
+    def test_results_with_the_old_dim_column_still_work_and_warn(self, feature_loadings, results):
+        legacy = results.rename(columns={"factor": "dim"})
+        with pytest.warns(DeprecationWarning, match="'dim' column is now called 'factor'"):
+            risk = peak_risk(feature_loadings, legacy)
+        assert "factor" in risk.columns
+        assert "dim" not in risk.columns
