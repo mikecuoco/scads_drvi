@@ -41,19 +41,20 @@ def read_results(
     results_root: str | Path,
     *,
     traits: Iterable[str],
-    annot2dim: Mapping[str, str],
+    annot2factor: Mapping[str, str] | None = None,
     direction: str | Mapping[str, str] = "combined",
     row: int = 0,
     strict: bool = True,
     fdr: bool = True,
     by: str | None = "trait",
+    annot2dim: Mapping[str, str] | None = None,
 ) -> pd.DataFrame:
     """Every trait's per-factor results as one tidy frame.
 
     `results_root` holds one directory per trait. Each is expected to contain a
-    ``.results`` file for every annotation name in `annot2dim` -- typically
-    :func:`scads_drvi.enrich.config.select_factors`'s ``k{i}`` numbering mapped back to
-    ``dim`` names (:func:`scads_drvi.enrich.config.kept_dims`, zipped against the
+    ``.results`` file for every annotation name in `annot2factor` (annotation name →
+    factor name) -- for a DRVI fit, :func:`scads_drvi.enrich.config.select_factors`'s
+    ``k{i}`` numbering mapped back to factor names (:func:`scads_drvi.enrich.config.kept_dims`, zipped against the
     annotation names it was assigned).
 
     `direction` records which sign of the latent dimension each result came from --
@@ -61,7 +62,7 @@ def read_results(
     name to ``"pos"``/``"neg"`` when it was (a pos/neg loadings view is built with
     ``np.clip(embed.X, 0, None)``/``np.clip(-embed.X, 0, None)``; this function only
     records which one a result file came from). This
-    ``dim``/``direction`` pair is what replaces the old split contract's
+    ``factor``/``direction`` pair is what replaces the old split contract's
     ``half_map.tsv`` and three-name label system: a caller filters
     ``results.query("direction == 'pos' and trait == 'X'")`` instead of resolving an
     annotation-name alias.
@@ -70,13 +71,17 @@ def read_results(
     missing ones. Set it False only when you deliberately want a partial table, and note
     that the FDR correction is then over fewer tests than were intended.
 
-    Adds ``trait``, ``annot``, ``dim`` and ``direction`` columns, and -- with
+    Adds ``trait``, ``annot``, ``factor`` and ``direction`` columns, and -- with
     ``fdr=True`` -- a one-tailed p and BH q corrected within each `by` group.
     """
     import pandas as pd
 
+    from scads_drvi._util.compat import renamed_kwarg
     from scads_drvi.stats import add_fdr as _add_fdr
 
+    annot2factor = renamed_kwarg(annot2factor, annot2dim, new="annot2factor", old="annot2dim")
+    if annot2factor is None:
+        raise TypeError("read_results() missing required keyword argument: 'annot2factor'")
     results_root = Path(results_root)
     traits = list(traits)
     if not traits:
@@ -88,15 +93,15 @@ def read_results(
     records = []
     for trait in traits:
         found = results_files(results_root / trait)
-        missing = [a for a in annot2dim if a not in found]
+        missing = [a for a in annot2factor if a not in found]
         if missing and strict:
             raise FileNotFoundError(
-                f"trait {trait!r} is missing {len(missing)} of {len(annot2dim)} "
+                f"trait {trait!r} is missing {len(missing)} of {len(annot2factor)} "
                 f"result files, e.g. {missing[:5]}. Skipping them would shrink the "
                 f"multiplicity denominator and make every surviving q optimistic; pass "
                 f"strict=False if a partial table is genuinely what you want."
             )
-        for annot, dim in annot2dim.items():
+        for annot, factor in annot2factor.items():
             path = found.get(annot)
             if path is None:
                 continue
@@ -109,7 +114,7 @@ def read_results(
             record = table.iloc[row].to_dict()
             record["trait"] = trait
             record["annot"] = annot
-            record["dim"] = dim
+            record["factor"] = factor
             record["direction"] = _direction_for(annot)
             records.append(record)
 

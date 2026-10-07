@@ -66,7 +66,7 @@ def results():
             rows.append(
                 {
                     "trait": trait,
-                    "dim": f"dim_{k}",
+                    "factor": f"dim_{k}",
                     "display": f"dim_{k}",
                     "Coefficient_z-score": rng.normal(loc=1.0, scale=1.5),
                 }
@@ -189,7 +189,7 @@ class TestEnrichmentFigures:
 
     def test_heritability_landscape_needs_fdr_columns(self):
         bare_frame = pd.DataFrame(
-            {"trait": ["t"], "dim": ["dim_0"], "Coefficient_z-score": [1.0]}
+            {"trait": ["t"], "factor": ["dim_0"], "Coefficient_z-score": [1.0]}
         )
         with pytest.raises(KeyError, match="add_fdr"):
             heritability_landscape(bare_frame, trait="t")
@@ -200,8 +200,8 @@ class TestEnrichmentFigures:
 
     def test_heritability_landscape_titles_map_dim_to_dr_names(self):
         rows = [
-            {"trait": "t", "dim": "dim_5", "direction": "pos", "Coefficient_z-score": 3.0},
-            {"trait": "t", "dim": "dim_5", "direction": "neg", "Coefficient_z-score": -1.0},
+            {"trait": "t", "factor": "dim_5", "direction": "pos", "Coefficient_z-score": 3.0},
+            {"trait": "t", "factor": "dim_5", "direction": "neg", "Coefficient_z-score": -1.0},
         ]
         frame = add_fdr(pd.DataFrame(rows), by="trait")
         fig, (bars, _) = heritability_landscape(frame, trait="t", titles={"dim_5": "DR 6"})
@@ -225,9 +225,9 @@ class TestEnrichmentFigures:
         numpy 2 refuses to bin and numpy 1 quietly widened."""
         rows = []
         for k in range(8):
-            rows.append({"trait": "a", "dim": f"dim_{k}", "Coefficient_z-score": 1.0 * k})
+            rows.append({"trait": "a", "factor": f"dim_{k}", "Coefficient_z-score": 1.0 * k})
             rows.append(
-                {"trait": "b", "dim": f"dim_{k}", "Coefficient_z-score": 1.0 * k + 0.3}
+                {"trait": "b", "factor": f"dim_{k}", "Coefficient_z-score": 1.0 * k + 0.3}
             )
         fig, (_, hist) = trait_concordance(pd.DataFrame(rows), traits=["a", "b"])
         assert isinstance(fig, Figure)
@@ -235,16 +235,16 @@ class TestEnrichmentFigures:
 
     def test_trait_concordance_with_a_single_shared_factor(self):
         rows = [
-            {"trait": "a", "dim": "dim_0", "Coefficient_z-score": 2.0},
-            {"trait": "b", "dim": "dim_0", "Coefficient_z-score": 2.5},
+            {"trait": "a", "factor": "dim_0", "Coefficient_z-score": 2.0},
+            {"trait": "b", "factor": "dim_0", "Coefficient_z-score": 2.5},
         ]
         fig, _ = trait_concordance(pd.DataFrame(rows), traits=["a", "b"])
         assert isinstance(fig, Figure)
 
     def test_trait_concordance_titles_map_dim_to_dr_names(self):
         rows = [
-            {"trait": "a", "dim": "dim_5", "direction": "pos", "Coefficient_z-score": 2.0},
-            {"trait": "b", "dim": "dim_5", "direction": "pos", "Coefficient_z-score": 2.5},
+            {"trait": "a", "factor": "dim_5", "direction": "pos", "Coefficient_z-score": 2.0},
+            {"trait": "b", "factor": "dim_5", "direction": "pos", "Coefficient_z-score": 2.5},
         ]
         fig, (scatter, _) = trait_concordance(
             pd.DataFrame(rows), traits=["a", "b"], titles={"dim_5": "DR 6"}
@@ -298,7 +298,7 @@ class TestEnrichmentFigures:
                 "chrom": ["chr1", "chr1", "chr2", "chr2"],
                 "start": [100, 300, 100, 300],
                 "end": [200, 400, 200, 400],
-                "dim": ["dim_0", "dim_1", "dim_0", "dim_1"],
+                "factor": ["dim_0", "dim_1", "dim_0", "dim_1"],
                 "direction": ["pos", "pos", "neg", "neg"],
                 "loading": [0.5, 0.2, 0.3, 0.9],
                 "tau": [2.0, 1.0, 1.0, 1.0],
@@ -312,14 +312,22 @@ class TestEnrichmentFigures:
         assert isinstance(fig, Figure)
         assert len(ax.collections[0].get_offsets()) == risk["peak"].nunique()
 
-    def test_risk_manhattan_dim_subset_keeps_every_row(self, risk):
-        _, ax = risk_manhattan(risk, dim_subset=["dim_0"])
-        expected = (risk["dim"] == "dim_0").sum()
+    def test_risk_manhattan_factor_subset_keeps_every_row(self, risk):
+        _, ax = risk_manhattan(risk, factor_subset=["dim_0"])
+        expected = (risk["factor"] == "dim_0").sum()
         assert len(ax.collections[0].get_offsets()) == expected
 
-    def test_risk_manhattan_unknown_dim_subset_is_refused(self, risk):
-        with pytest.raises(ValueError, match="dim_subset"):
-            risk_manhattan(risk, dim_subset=["not_a_dim"])
+    def test_risk_manhattan_unknown_factor_subset_is_refused(self, risk):
+        with pytest.raises(ValueError, match="factor_subset"):
+            risk_manhattan(risk, factor_subset=["not_a_dim"])
+
+    def test_risk_manhattan_old_dim_subset_and_dim_column_still_work(self, risk):
+        legacy = risk.rename(columns={"factor": "dim"})
+        with pytest.warns(DeprecationWarning) as caught:
+            _, ax = risk_manhattan(legacy, dim_subset=["dim_0"])
+        messages = " ".join(str(w.message) for w in caught)
+        assert "dim_subset" in messages and "'dim' column" in messages
+        assert len(ax.collections[0].get_offsets()) == (risk["factor"] == "dim_0").sum()
 
     def test_risk_manhattan_needs_risk_columns(self):
         with pytest.raises(KeyError, match="chrom"):
@@ -332,7 +340,7 @@ class TestEnrichmentFigures:
                 "chrom": ["chr10", "chr2", "chrX"],
                 "start": [1, 1, 1],
                 "end": [2, 2, 2],
-                "dim": ["dim_0"] * 3,
+                "factor": ["dim_0"] * 3,
                 "direction": ["pos"] * 3,
                 "risk_total": [1.0, 1.0, 1.0],
             }

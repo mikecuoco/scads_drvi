@@ -31,7 +31,7 @@ def loadings():
 def results():
     return pd.DataFrame(
         {
-            "dim": ["dim_0", "dim_1", "dim_2", "dim_3"],
+            "factor": ["dim_0", "dim_1", "dim_2", "dim_3"],
             "Coefficient_z-score": [3.0, -2.0, 0.0, 1.5],
         }
     )
@@ -56,35 +56,35 @@ class TestNulls:
 
 class TestFactorWeights:
     def test_negative_z_is_clipped_by_default(self, results):
-        w = factor_weights(results, dims=["dim_0", "dim_1"])
+        w = factor_weights(results, factors=["dim_0", "dim_1"])
         assert list(w) == [3.0, 0.0]
 
     def test_clipping_can_be_disabled(self, results):
-        w = factor_weights(results, dims=["dim_1"], clip_negative=False)
+        w = factor_weights(results, factors=["dim_1"], clip_negative=False)
         assert w[0] == -2.0
 
     def test_order_follows_the_requested_dims(self, results):
-        w = factor_weights(results, dims=["dim_3", "dim_0"])
+        w = factor_weights(results, factors=["dim_3", "dim_0"])
         assert list(w) == [1.5, 3.0]
 
     def test_missing_factor_is_named(self, results):
         with pytest.raises(KeyError, match="no result row"):
-            factor_weights(results, dims=["dim_9"])
+            factor_weights(results, factors=["dim_9"])
 
     def test_duplicate_dims_are_refused(self, results):
         doubled = pd.concat([results, results])
         with pytest.raises(ValueError, match="more than one trait"):
-            factor_weights(doubled, dims=["dim_0"])
+            factor_weights(doubled, factors=["dim_0"])
 
     def test_missing_column_is_named(self, results):
         with pytest.raises(KeyError, match="nope"):
-            factor_weights(results, dims=["dim_0"], column="nope")
+            factor_weights(results, factors=["dim_0"], column="nope")
 
 
 class TestCsFromZ:
     def test_matches_the_notebook_expression(self, loadings, results):
         """Pin the collapse: this must equal L[kept] @ max(0, z) exactly."""
-        dims = results["dim"].tolist()
+        dims = results["factor"].tolist()
         expected = loadings[dims].to_numpy(dtype=np.float64) @ np.maximum(
             results["Coefficient_z-score"].to_numpy(dtype=float), 0.0
         )
@@ -110,19 +110,19 @@ class TestCsFromZ:
         got = cs_from_z(loadings, results, model="m", trait="t")
         assert got.kind is ScoreKind.Z_WEIGHTED
         assert got.null == 0.0
-        assert got.dims == ("dim_0", "dim_1", "dim_2", "dim_3")
+        assert got.factors == ("dim_0", "dim_1", "dim_2", "dim_3")
         assert got.model == "m" and got.trait == "t"
 
     def test_factors_absent_from_the_loadings_are_counted(self, loadings, results):
         extra = pd.concat(
-            [results, pd.DataFrame({"dim": ["dim_9"], "Coefficient_z-score": [5.0]})]
+            [results, pd.DataFrame({"factor": ["dim_9"], "Coefficient_z-score": [5.0]})]
         )
         got = cs_from_z(loadings, extra, model="m", trait="t")
         assert got.n_unscored == 1
-        assert "dim_9" not in got.dims
+        assert "dim_9" not in got.factors
 
     def test_no_overlap_at_all_is_an_error(self, loadings):
-        results = pd.DataFrame({"dim": ["other"], "Coefficient_z-score": [1.0]})
+        results = pd.DataFrame({"factor": ["other"], "Coefficient_z-score": [1.0]})
         with pytest.raises(ValueError, match="no factor in the results table"):
             cs_from_z(loadings, results, model="m", trait="t")
 
@@ -192,3 +192,38 @@ class TestCompareScores:
         )
         out = compare_scores(left, trimmed)
         assert out.loc[0, "n_shared"] == 5
+
+
+class TestRenamedNames:
+    """`dim` became `factor` (column, `factors=`, `factor_column=`, `CellScores.factors`)."""
+
+    def test_old_column_name_still_works_and_warns(self, loadings, results):
+        legacy = results.rename(columns={"factor": "dim"})
+        with pytest.warns(DeprecationWarning, match="'dim' column is now called 'factor'"):
+            got = cs_from_z(loadings, legacy, model="m", trait="t")
+        ref = cs_from_z(loadings, results, model="m", trait="t")
+        assert np.allclose(got.values.to_numpy(), ref.values.to_numpy())
+
+    def test_old_dims_keyword_still_works_and_warns(self, results):
+        with pytest.warns(DeprecationWarning, match="`dims` is now `factors`"):
+            w = factor_weights(results, dims=["dim_0", "dim_1"])
+        assert list(w) == [3.0, 0.0]
+
+    def test_old_dim_column_keyword_still_works_and_warns(self, results):
+        legacy = results.rename(columns={"factor": "dim"})
+        with pytest.warns(DeprecationWarning, match="`dim_column` is now `factor_column`"):
+            w = factor_weights(legacy, factors=["dim_0"], dim_column="dim")
+        assert list(w) == [3.0]
+
+    def test_both_old_and_new_keyword_is_an_error(self, results):
+        with pytest.raises(TypeError, match="pass `factors` only"):
+            factor_weights(results, factors=["dim_0"], dims=["dim_0"])
+
+    def test_factors_are_required(self, results):
+        with pytest.raises(TypeError, match="'factors'"):
+            factor_weights(results)
+
+    def test_cell_scores_dims_property_is_a_deprecated_alias(self, loadings, results):
+        got = cs_from_z(loadings, results, model="m", trait="t")
+        with pytest.warns(DeprecationWarning, match="`CellScores.dims`"):
+            assert got.dims == got.factors

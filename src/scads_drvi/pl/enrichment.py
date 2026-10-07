@@ -1,10 +1,10 @@
 """Enrichment figures.
 
 Every function takes tidy frames -- never a path -- and returns the figure plus its axes.
-Tick labels are the results table's own ``dim`` value plus a ``+``/``-`` suffix when the
+Tick labels are the results table's own ``factor`` value plus a ``+``/``-`` suffix when the
 row carries a ``direction`` (see :func:`scads_drvi.enrich.ldsc.read_results`); pass
 ``titles=embed.var["title"]`` to show DRVI's own ``"DR 1"`` naming instead of the raw
-``dim`` value (``"dim_47"``) -- the same ``"DR 1+"``/``"DR 1-"`` convention
+``factor`` value (``"dim_47"``) -- the same ``"DR 1+"``/``"DR 1-"`` convention
 :func:`scads_drvi.pl.umap.latent_umap_grid` uses. Any function that would otherwise
 receive a per-cell table takes a :class:`~scads_drvi.pl.frugal.BoxStats` instead, which
 makes handing it a million rows impossible rather than merely inadvisable.
@@ -40,17 +40,20 @@ _SUFFIX = {"pos": "+", "neg": "-", "combined": ""}
 
 
 def _labelled(results: pd.DataFrame, titles: Mapping[str, str] | None = None) -> list[str]:
-    """A reader-facing name per row: ``dim`` (or its display title, from `titles`, when
+    """A reader-facing name per row: ``factor`` (or its display title, from `titles`, when
     given -- e.g. DRVI's own ``"DR 1"``) plus a ``+``/``-`` suffix when the row carries
     a ``direction``, without ever materializing a ``dim_47/pos``-shaped column name.
     """
-    dims = results["dim"].astype(str)
+    from scads_drvi._util.compat import with_factor_column
+
+    results = with_factor_column(results)
+    factors = results["factor"].astype(str)
     if titles is not None:
-        dims = dims.map(titles).fillna(dims)
+        factors = factors.map(titles).fillna(factors)
     if "direction" not in results.columns:
-        return dims.tolist()
+        return factors.tolist()
     suffix = results["direction"].map(_SUFFIX).fillna("")
-    return (dims + suffix).tolist()
+    return (factors + suffix).tolist()
 
 
 def heritability_landscape(
@@ -160,18 +163,21 @@ def trait_concordance(
     A sensitivity analysis reads as concordance plus a shift; separating the two panels
     keeps "the same factors rank highly" distinguishable from "every z moved down".
     `titles` (e.g. `embed.var["title"]`) shows each top-`top_n` annotation as DRVI's own
-    `"DR 1"` naming plus a `+`/`-` suffix, rather than the raw `dim` value.
+    `"DR 1"` naming plus a `+`/`-` suffix, rather than the raw `factor` value.
     """
     import matplotlib.pyplot as plt
 
+    from scads_drvi._util.compat import with_factor_column
+
+    results = with_factor_column(results)
     traits = list(traits)
     if len(traits) != 2:
         raise ValueError(f"need exactly two traits, got {traits}")
 
-    # Pivoting on `dim` alone would silently average a directional arm's pos and neg
+    # Pivoting on `factor` alone would silently average a directional arm's pos and neg
     # rows together -- pivot on both when `direction` is present so each row of `wide`
     # is still one factor, not one factor with two directions blended into it.
-    index = ["dim", "direction"] if "direction" in results.columns else "dim"
+    index = ["factor", "direction"] if "direction" in results.columns else "factor"
     wide = results.pivot_table(index=index, columns="trait", values=z_column)
     missing = [t for t in traits if t not in wide.columns]
     if missing:
@@ -181,11 +187,11 @@ def trait_concordance(
         raise ValueError("no factor has a z-score for both traits")
 
     left, right = wide[traits[0]].to_numpy(), wide[traits[1]].to_numpy()
-    titled = (lambda dim: titles.get(dim, dim)) if titles is not None else (lambda dim: dim)
+    titled = (lambda f: titles.get(f, f)) if titles is not None else (lambda f: f)
     if isinstance(index, list):
-        names = [f"{titled(dim)}{_SUFFIX.get(direction, '')}" for dim, direction in wide.index]
+        names = [f"{titled(f)}{_SUFFIX.get(direction, '')}" for f, direction in wide.index]
     else:
-        names = [titled(str(dim)) for dim in wide.index]
+        names = [titled(str(f)) for f in wide.index]
 
     fig, (scatter, hist) = plt.subplots(1, 2, figsize=(9.0, 3.6))
 
@@ -396,18 +402,19 @@ def risk_manhattan(
     risk: pd.DataFrame,
     *,
     value_col: str = "risk_total",
-    dim_subset: Sequence[str] | None = None,
+    factor_subset: Sequence[str] | None = None,
     titles: Mapping[str, str] | None = None,
     s: float = 8.0,
+    dim_subset: Sequence[str] | None = None,
 ) -> tuple[Figure, Axes]:
     """Genome-wide scatter of peak-level risk (:func:`scads_drvi.enrich.risk.peak_risk`'s
     output) -- position on x, `value_col` on y.
 
-    Default view (`dim_subset=None`): one point per peak, its highest `value_col`
-    across every `(dim, direction)` row that mentions it -- the peak-resolution
+    Default view (`factor_subset=None`): one point per peak, its highest `value_col`
+    across every `(factor, direction)` row that mentions it -- the peak-resolution
     analogue of picking a signal's single top-capturing factor -- coloured by *which*
-    factor that is. `dim_subset` shows every row for those specific factors instead
-    (still one point per `(peak, dim, direction)`), e.g. to look at one factor's own
+    factor that is. `factor_subset` shows every row for those specific factors instead
+    (still one point per `(peak, factor, direction)`), e.g. to look at one factor's own
     risk track alone rather than the genome-wide maximum.
 
     X position is a running genomic offset built from `risk`'s own `chrom`/`start`/
@@ -415,25 +422,30 @@ def risk_manhattan(
     (:func:`_chrom_sort_key`) -- not a hardcoded assembly length table, so a
     chromosome's span here is only as wide as the peaks actually plotted make it, not
     its real length.
+
+    `dim_subset` is the deprecated old name of `factor_subset`.
     """
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
 
+    from scads_drvi._util.compat import renamed_kwarg, with_factor_column
     from scads_drvi.pl.color import categorical_palette
 
-    for column in ("peak", "chrom", "start", "dim", "direction", value_col):
+    factor_subset = renamed_kwarg(factor_subset, dim_subset, new="factor_subset", old="dim_subset")
+    risk = with_factor_column(risk)
+    for column in ("peak", "chrom", "start", "factor", "direction", value_col):
         if column not in risk.columns:
             raise KeyError(f"{column!r} not in risk; run enrich.risk.peak_risk first")
 
-    frame = risk if dim_subset is None else risk[risk["dim"].isin(dim_subset)]
+    frame = risk if factor_subset is None else risk[risk["factor"].isin(factor_subset)]
     if frame.empty:
         raise ValueError(
             "no rows to plot"
-            if dim_subset is None
-            else f"no rows for dim_subset={list(dim_subset)!r}"
+            if factor_subset is None
+            else f"no rows for factor_subset={list(factor_subset)!r}"
         )
 
-    if dim_subset is None:
+    if factor_subset is None:
         frame = frame.loc[frame.groupby("peak")[value_col].idxmax()]
 
     end_col = "end" if "end" in frame.columns else "start"
@@ -447,9 +459,9 @@ def risk_manhattan(
     x = frame["chrom"].astype(str).map(offsets).to_numpy() + frame["start"].to_numpy()
     y = frame[value_col].to_numpy(dtype=float)
 
-    titled = (lambda dim: titles.get(dim, dim)) if titles is not None else (lambda dim: dim)
-    palette = categorical_palette(frame["dim"].astype(str).tolist())
-    colors = frame["dim"].astype(str).map(palette)
+    titled = (lambda f: titles.get(f, f)) if titles is not None else (lambda f: f)
+    palette = categorical_palette(frame["factor"].astype(str).tolist())
+    colors = frame["factor"].astype(str).map(palette)
 
     fig, ax = plt.subplots(figsize=(max(9.0, 0.4 * len(chroms)), 3.6))
     ax.scatter(x, y, c=colors, s=s, linewidths=0)
@@ -461,8 +473,8 @@ def risk_manhattan(
     ax.set_ylabel(value_col)
 
     handles = [
-        Line2D([0], [0], marker="o", linestyle="", color=color, label=titled(dim))
-        for dim, color in palette.items()
+        Line2D([0], [0], marker="o", linestyle="", color=color, label=titled(factor))
+        for factor, color in palette.items()
     ]
     ax.legend(
         handles=handles,

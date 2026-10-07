@@ -146,12 +146,12 @@ from scads_drvi.enrich.ldsc import read_results
 
 fmap = select_factors(embed.var, list(embed.var_names))
 keep = kept_dims(fmap)                       # dims that survive vanished-filtering
-annot2dim = {f"k{i + 1}": dim for i, dim in enumerate(keep)}
+annot2factor = {f"k{i + 1}": factor for i, factor in enumerate(keep)}
 
 bim = read_bim("1000G.EUR.QC.1.bim")
 
-for annot, dim in annot2dim.items():
-    thin = ...  # peaks -> per-SNP annotation for `dim`, one 0/1+ column, in bim order
+for annot, factor in annot2factor.items():
+    thin = ...  # peaks -> per-SNP annotation for `factor`, one 0/1+ column, in bim order
     pd.DataFrame({annot: thin}).to_csv(f"annot/{annot}.1.annot.gz", sep="\t", index=False)
     # --thin-annot accepts that shape directly; --out writes .l2.ldscore.gz/.M/.M_5_50.
     # --annot takes the full file name.
@@ -168,12 +168,12 @@ for annot, dim in annot2dim.items():
     ], check=True)
 ```
 
-Reading the results back attaches one tidy table, keyed by `dim` and `direction`, into
+Reading the results back attaches one tidy table, keyed by `factor` and `direction`, into
 the same h5ad (there is no persisted `dim_j/pos`/`dim_j/neg` split; a directional
 loadings view is derived on demand, see below):
 
 ```python
-results = read_results(results_root, traits=("trait_a", "trait_b"), annot2dim=annot2dim)
+results = read_results(results_root, traits=("trait_a", "trait_b"), annot2factor=annot2factor)
 embed.uns.setdefault("enrich", {})["my_arm"] = {
     "results": results,
     "factor_selection": fmap.drop(columns="annot_index"),

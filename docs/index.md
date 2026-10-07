@@ -32,7 +32,7 @@ takes an explicit path, a bare read is just `anndata.read_h5ad(path)`, a write i
 | `stats` | one-tailed p, Benjamini–Hochberg, BH-boundary z |
 | `enrich.annotations` | reading a bim's row order |
 | `enrich.config` | factor selection: which DRVI latent dimensions get enriched |
-| `enrich.ldsc` | read `.results` files into one tidy `dim`/`direction`/`trait` table |
+| `enrich.ldsc` | read `.results` files into one tidy `factor`/`direction`/`trait` table |
 | `scores.cell` / `.aggregate` | the two `CS_i` formulas; group summaries and matrices |
 | `annotate.motif` / `.gc` | weighted factor-motif enrichment against a region x motif score database, calibrated by an exact (never sampled) permutation null |
 | `annotate.resources` | resolves aertslab's public SCREEN cisTarget score database (cache/verify/opt-in download, ~14 GB) |

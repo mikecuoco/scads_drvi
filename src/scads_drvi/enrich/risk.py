@@ -54,19 +54,19 @@ def peak_risk(
     coefficient_col: str = "Coefficient",
     include_zero: bool = False,
 ) -> pd.DataFrame:
-    """One tidy row per `(peak, dim, direction)`: that peak's share of the factor's
+    """One tidy row per `(peak, factor, direction)`: that peak's share of the factor's
     S-LDSC heritability.
 
     `feature_loadings` maps each direction the sweep actually tested (``"pos"``/
     ``"neg"``, or ``"combined"`` if it wasn't run per-direction) to its own peaks x
-    kept-dims loading frame -- exactly the split :func:`scads_drvi.enrich.ldsc.read_results`'s
+    kept-factors loading frame -- exactly the split :func:`scads_drvi.enrich.ldsc.read_results`'s
     own `direction` parameter already expects to exist (a caller-derived
     ``clip(loadings, 0, None)``/``clip(-loadings, 0, None)`` pair from one signed
     matrix, or DRVI's own already-split ``get_effect_of_splits_within_distribution``
     output directly -- the real S-LDSC sweep in `pbmc.ipynb` uses the latter). This
     function never owns that split, same as `read_results` never derives it either.
 
-    `results` is `read_results`'s own tidy output; every `(dim, direction)` pair
+    `results` is `read_results`'s own tidy output; every `(factor, direction)` pair
     present in `feature_loadings` must have a matching fitted row there, or this
     raises naming the missing pair -- a factor scored with no fitted coefficient is a
     caller data problem, not something to silently skip.
@@ -81,28 +81,30 @@ def peak_risk(
     """
     import pandas as pd
 
+    from scads_drvi._util.compat import with_factor_column
     from scads_drvi.enrich.config import parse_peaks
 
-    for column in ("dim", "direction", coefficient_col):
+    results = with_factor_column(results)
+    for column in ("factor", "direction", coefficient_col):
         if column not in results.columns:
             raise KeyError(f"{column!r} not in results; run enrich.ldsc.read_results first")
 
-    tau = results.set_index(["dim", "direction"])[coefficient_col]
+    tau = results.set_index(["factor", "direction"])[coefficient_col]
 
     blocks = []
     for direction, loadings in feature_loadings.items():
         peaks = parse_peaks(loadings.index)
         peaks.index = loadings.index
-        for dim in loadings.columns:
-            key = (str(dim), str(direction))
+        for factor in loadings.columns:
+            key = (str(factor), str(direction))
             if key not in tau.index:
                 raise KeyError(
-                    f"results has no {coefficient_col!r} for dim={dim!r}, "
+                    f"results has no {coefficient_col!r} for factor={factor!r}, "
                     f"direction={direction!r} -- every scored factor/direction needs "
                     "a fitted result."
                 )
             t = float(tau.loc[key])
-            values = loadings[dim]
+            values = loadings[factor]
             if not include_zero:
                 values = values[values != 0.0]
             if values.empty:
@@ -114,7 +116,7 @@ def peak_risk(
                     "chrom": peaks.loc[values.index, "chrom"].to_numpy(),
                     "start": peaks.loc[values.index, "start"].to_numpy(),
                     "end": peaks.loc[values.index, "end"].to_numpy(),
-                    "dim": str(dim),
+                    "factor": str(factor),
                     "direction": str(direction),
                     "loading": values.to_numpy(dtype=float),
                     "tau": t,
@@ -127,7 +129,7 @@ def peak_risk(
 
     if not blocks:
         raise ValueError(
-            "no nonzero loadings to score across every (dim, direction) in "
+            "no nonzero loadings to score across every (factor, direction) in "
             "feature_loadings -- pass include_zero=True if an all-zero result is "
             "genuinely expected"
         )
@@ -138,8 +140,8 @@ def peak_risk(
 def top_risk_peaks(risk: pd.DataFrame, n: int = 20, *, by: str = "risk_total") -> pd.DataFrame:
     """The top-`n` rows of `risk` (:func:`peak_risk`'s output) ranked by `by`.
 
-    Ranks the whole frame as one pool -- group `risk` by `dim`/`direction` first (e.g.
-    ``risk.groupby(["dim", "direction"]).apply(top_risk_peaks, n)``) for each factor's
+    Ranks the whole frame as one pool -- group `risk` by `factor`/`direction` first (e.g.
+    ``risk.groupby(["factor", "direction"]).apply(top_risk_peaks, n)``) for each factor's
     own top peaks instead of one global ranking.
     """
     if by not in risk.columns:

@@ -20,6 +20,7 @@ rather than from a constant typed next to the axis.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -69,9 +70,17 @@ class CellScores:
     kind: ScoreKind
     model: str
     trait: str
-    dims: tuple[str, ...] = ()
+    factors: tuple[str, ...] = ()
     weights: np.ndarray | None = field(default=None, repr=False)
     n_unscored: int = 0
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        """Deprecated name of :attr:`factors`."""
+        warnings.warn(
+            "`CellScores.dims` is now `CellScores.factors`", DeprecationWarning, stacklevel=2
+        )
+        return self.factors
 
     @property
     def null(self) -> float:
@@ -98,34 +107,49 @@ class CellScores:
 def factor_weights(
     results: pd.DataFrame,
     *,
-    dims: Iterable[str],
+    factors: Iterable[str] | None = None,
     column: str = "Coefficient_z-score",
     clip_negative: bool = True,
-    dim_column: str = "dim",
+    factor_column: str | None = None,
+    dims: Iterable[str] | None = None,
+    dim_column: str | None = None,
 ) -> np.ndarray:
-    """Weights aligned to `dims`, in that order.
+    """Weights aligned to `factors`, in that order.
 
+    `results` has one row per factor, keyed by `factor_column` (default ``"factor"``).
     `clip_negative` applies ``max(0, z)``: a factor whose annotation carries *less*
     heritability than baseline is evidence against involvement, and letting it subtract
     from a cell's score would let depletion in one factor mask enrichment in another.
+
+    `dims` and `dim_column` are the deprecated old names of `factors` and `factor_column`.
     """
-    dims = list(dims)
+    from scads_drvi._util.compat import renamed_kwarg, with_factor_column
+
+    factors = renamed_kwarg(factors, dims, new="factors", old="dims")
+    if factors is None:
+        raise TypeError("factor_weights() missing required keyword argument: 'factors'")
+    factor_column = renamed_kwarg(
+        factor_column, dim_column, new="factor_column", old="dim_column"
+    ) or "factor"
+    factors = list(factors)
     if column not in results.columns:
         raise KeyError(f"{column!r} not in results; columns are {list(results.columns)}")
-    if dim_column not in results.columns:
-        raise KeyError(f"{dim_column!r} not in results")
+    if factor_column == "factor":
+        results = with_factor_column(results)
+    if factor_column not in results.columns:
+        raise KeyError(f"{factor_column!r} not in results")
 
-    indexed = results.set_index(dim_column)
-    missing = [d for d in dims if d not in indexed.index]
+    indexed = results.set_index(factor_column)
+    missing = [d for d in factors if d not in indexed.index]
     if missing:
         raise KeyError(f"no result row for {len(missing)} requested factor(s), e.g. {missing[:5]}")
     if indexed.index.has_duplicates:
         raise ValueError(
-            f"{dim_column!r} is not unique in results -- did you pass more than one "
+            f"{factor_column!r} is not unique in results -- did you pass more than one "
             f"trait? Filter to one trait before computing weights."
         )
 
-    weights = indexed.loc[dims, column].to_numpy(dtype=float)
+    weights = indexed.loc[factors, column].to_numpy(dtype=float)
     if clip_negative:
         weights = np.maximum(weights, 0.0)
     return weights
@@ -156,24 +180,27 @@ def cs_from_z(
     """
     import pandas as pd
 
+    from scads_drvi._util.compat import with_factor_column
+
     if not isinstance(loadings, pd.DataFrame):
         raise TypeError("loadings must be a DataFrame of cells x factors")
 
-    dims = [d for d in results["dim"].tolist() if d in loadings.columns]
-    if not dims:
+    results = with_factor_column(results)
+    factors = [d for d in results["factor"].tolist() if d in loadings.columns]
+    if not factors:
         raise ValueError(
             "no factor in the results table is a column of the loadings matrix. "
-            f"Results name e.g. {results['dim'].tolist()[:3]}; loadings columns are "
+            f"Results name e.g. {results['factor'].tolist()[:3]}; loadings columns are "
             f"e.g. {list(loadings.columns)[:3]}."
         )
 
-    weights = factor_weights(results, dims=dims, column=column, clip_negative=clip_negative)
+    weights = factor_weights(results, factors=factors, column=column, clip_negative=clip_negative)
 
     n = len(loadings)
     out = np.empty(n, dtype=np.float64)
     step = max(int(chunk_rows), 1)
     for start in range(0, n, step):
-        block = loadings.iloc[start : start + step][dims].to_numpy(dtype=np.float64)
+        block = loadings.iloc[start : start + step][factors].to_numpy(dtype=np.float64)
         out[start : start + step] = block @ weights
 
     values = pd.Series(out, index=loadings.index, name="cs")
@@ -182,9 +209,9 @@ def cs_from_z(
         kind=ScoreKind.Z_WEIGHTED,
         model=model,
         trait=trait,
-        dims=tuple(dims),
+        factors=tuple(factors),
         weights=weights,
-        n_unscored=int(len(results) - len(dims)),
+        n_unscored=int(len(results) - len(factors)),
     )
 
 
