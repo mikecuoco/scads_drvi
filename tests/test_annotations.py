@@ -92,8 +92,82 @@ class TestAssignPeaks:
     def test_overlapping_peaks_raise(self):
         bim = make_snp_bim("1", [250])
         peaks = ["chr1:100-300", "chr1:200-400"]  # both contain 250
-        with pytest.raises(ValueError, match="overlaps more than one peak"):
+        with pytest.raises(ValueError, match="peaks must not overlap"):
             assign_peaks(bim, peaks)
+
+    def test_peak_edges_follow_one_based_positions_and_zero_based_peaks(self):
+        # "chr1:100-200" is 0-based half-open, so it covers 1-based positions 101..200.
+        bim = make_snp_bim("1", [99, 100, 101, 150, 200, 201])
+        got = assign_peaks(bim, ["chr1:100-200"])
+        assert got.notna().tolist() == [False, False, True, True, True, False]
+
+    def test_adjacent_peaks_split_at_the_shared_edge(self):
+        bim = make_snp_bim("1", [200, 201])
+        got = assign_peaks(bim, ["chr1:100-200", "chr1:200-300"])
+        assert got.tolist() == ["chr1:100-200", "chr1:200-300"]
+
+    def test_nested_peaks_raise_even_when_a_third_peak_sits_between(self):
+        # A contains B and C. Checking only the nearest neighbour misses A-vs-C.
+        bim = make_snp_bim("1", [450, 700])
+        peaks = ["chr1:100-1000", "chr1:200-300", "chr1:400-500"]
+        with pytest.raises(ValueError, match="peaks must not overlap: chr1:100-1000 and"):
+            assign_peaks(bim, peaks)
+
+    def test_overlap_is_checked_for_the_whole_peak_set_not_only_where_snps_fall(self):
+        bim = make_snp_bim("1", [150])
+        with pytest.raises(ValueError, match="peaks must not overlap"):
+            assign_peaks(bim, ["chr1:100-200", "chr5:100-300", "chr5:200-400"])
+
+    def test_peaks_on_chromosomes_absent_from_bim_are_ignored(self):
+        bim = make_snp_bim("1", [150])
+        got = assign_peaks(bim, ["chr1:100-200", "chrUn_x:1-50", "chrUn_x:60-90"])
+        assert got.iloc[0] == "chr1:100-200"
+
+    def test_zero_length_peak_inside_another_is_not_an_overlap(self):
+        bim = make_snp_bim("1", [150])
+        got = assign_peaks(bim, ["chr1:100-200", "chr1:150-150"])
+        assert got.iloc[0] == "chr1:100-200"
+
+    def test_zero_length_peak_contains_no_snp(self):
+        bim = make_snp_bim("1", [100, 150])
+        got = assign_peaks(bim, ["chr1:100-100", "chr1:120-200"])
+        assert pd.isna(got.iloc[0])
+        assert got.iloc[1] == "chr1:120-200"
+
+    def test_result_is_a_named_object_series_aligned_to_bim(self):
+        bim = make_snp_bim("1", [150, 999999]).set_index(pd.Index([7, 3]))
+        got = assign_peaks(bim, ["chr1:100-200"])
+        assert got.name == "peak"
+        assert got.dtype == object
+        assert got.index.tolist() == [7, 3]
+
+    def test_no_peak_on_the_bim_chromosomes_gives_all_na(self):
+        bim = make_snp_bim("2", [150, 250])
+        assert assign_peaks(bim, ["chr1:100-200"]).isna().all()
+
+    def test_coords_replace_the_coordinates_in_the_names(self):
+        # Names say 100-200 (the source build); coords say 1000-1100 (the panel's build).
+        bim = make_snp_bim("1", [150, 1050])
+        coords = pd.DataFrame(
+            {"chrom": ["chr1"], "start": [1000], "end": [1100]}, index=["chr1:100-200"]
+        )
+        got = assign_peaks(bim, ["chr1:100-200"], coords)
+        assert pd.isna(got.iloc[0])
+        assert got.iloc[1] == "chr1:100-200"
+
+    def test_peak_without_coords_is_never_assigned(self):
+        bim = make_snp_bim("1", [150, 350])
+        coords = pd.DataFrame(
+            {
+                "chrom": ["chr1", "chr1"],
+                "start": pd.array([100, pd.NA], dtype="Int64"),
+                "end": pd.array([200, pd.NA], dtype="Int64"),
+            },
+            index=["chr1:100-200", "chr1:300-400"],
+        )
+        got = assign_peaks(bim, ["chr1:100-200", "chr1:300-400"], coords)
+        assert got.iloc[0] == "chr1:100-200"
+        assert pd.isna(got.iloc[1])
 
     def test_missing_column_is_named(self):
         bim = make_snp_bim("1", [150]).drop(columns="BP")

@@ -61,6 +61,21 @@ class TestPeakSnpCounts:
         assert list(counts.index) == ["1:1000-1100"]
         assert counts.iloc[0] == 0
 
+    def test_edge_snps_follow_one_based_positions(self):
+        # "1:100-200" is 0-based half-open: it covers 1-based positions 101..200, so the SNPs
+        # at 101 and 200 count and the ones at 100 and 201 do not.
+        edge_bim = pd.DataFrame(
+            {
+                "CHR": ["1"] * 4,
+                "SNP": ["a", "b", "c", "d"],
+                "CM": [0.0] * 4,
+                "BP": [100, 101, 200, 201],
+                "A1": ["A"] * 4,
+                "A2": ["G"] * 4,
+            }
+        )
+        assert peak_snp_counts(["1:100-200"], edge_bim).loc["1:100-200"] == 2
+
 
 class TestPeakRisk:
     def test_risk_rate_is_loading_times_tau(self, feature_loadings, results):
