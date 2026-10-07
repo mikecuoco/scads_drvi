@@ -11,6 +11,7 @@ from scads_drvi.scores.cell import (
     CellScores,
     ScoreKind,
     compare_scores,
+    cs_from_enrichment,
     cs_from_z,
     factor_weights,
     read_cell_scores,
@@ -227,3 +228,102 @@ class TestRenamedNames:
         got = cs_from_z(loadings, results, model="m", trait="t")
         with pytest.warns(DeprecationWarning, match="`CellScores.dims`"):
             assert got.dims == got.factors
+
+
+class TestCsFromEnrichment:
+    """cs_i = sum_k L_ik a_k e_k / sum_k L_ik a_k, checked against hand arithmetic."""
+
+    @pytest.fixture
+    def toy(self):
+        # keys k1 (a=2, e=3) and k2 (a=6, e=1); four cells.
+        loadings = pd.DataFrame(
+            {"k1": [1.0, 0.0, 1.0, 0.0], "k2": [0.0, 1.0, 1.0, 0.0]},
+            index=["c0", "c1", "c2", "c3"],
+        )
+        enrichment = pd.Series({"k1": 3.0, "k2": 1.0})
+        annot_size = pd.Series({"k1": 2.0, "k2": 6.0})
+        return loadings, enrichment, annot_size
+
+    def test_matches_hand_computed_values(self, toy):
+        got = cs_from_enrichment(*toy, model="m", trait="t")
+        # c0: (1*2*3)/(1*2) = 3 ; c1: (1*6*1)/(1*6) = 1 ; c2: (2*3 + 6*1)/(2 + 6) = 1.5
+        assert got.values.iloc[:3].tolist() == pytest.approx([3.0, 1.0, 1.5])
+
+    def test_cell_with_no_loading_is_nan_and_counted_not_zero(self, toy):
+        got = cs_from_enrichment(*toy, model="m", trait="t")
+        assert np.isnan(got.values.loc["c3"])
+        assert got.n_unscored == 1
+
+    def test_kind_null_and_provenance(self, toy):
+        got = cs_from_enrichment(*toy, model="m", trait="t")
+        assert got.kind is ScoreKind.SCADS_RATIO
+        assert got.null == 1.0
+        assert got.factors == ("k1", "k2")
+        assert got.weights.tolist() == [6.0, 6.0]  # a_k * e_k
+        assert list(got.values.index) == ["c0", "c1", "c2", "c3"]
+
+    def test_excluded_key_gets_no_weight(self, toy):
+        got = cs_from_enrichment(*toy, model="m", trait="t", exclude=["k2"])
+        # only k1 scores: c0 -> 3, c2 -> 3; c1 loads only on the excluded key -> NaN
+        assert got.values.loc["c0"] == pytest.approx(3.0)
+        assert got.values.loc["c2"] == pytest.approx(3.0)
+        assert np.isnan(got.values.loc["c1"])
+        assert got.factors == ("k1",)
+
+    def test_all_enrichment_one_gives_the_null_everywhere_it_is_defined(self, toy):
+        loadings, _, annot_size = toy
+        got = cs_from_enrichment(
+            loadings, pd.Series({"k1": 1.0, "k2": 1.0}), annot_size, model="m", trait="t"
+        )
+        assert got.values.dropna().tolist() == pytest.approx([1.0, 1.0, 1.0])
+
+    def test_scale_invariance_in_loadings_and_annotation_size(self, toy):
+        loadings, enrichment, annot_size = toy
+        ref = cs_from_enrichment(loadings, enrichment, annot_size, model="m", trait="t")
+        scaled = cs_from_enrichment(
+            loadings * 7.5, enrichment, annot_size * 1e4, model="m", trait="t"
+        )
+        assert np.allclose(scaled.values.to_numpy(), ref.values.to_numpy(), equal_nan=True)
+
+    @pytest.mark.parametrize("chunk", [1, 3, 10_000])
+    def test_chunked_equals_unchunked(self, toy, chunk):
+        ref = cs_from_enrichment(*toy, model="m", trait="t", chunk_rows=10_000)
+        got = cs_from_enrichment(*toy, model="m", trait="t", chunk_rows=chunk)
+        assert np.allclose(got.values.to_numpy(), ref.values.to_numpy(), equal_nan=True)
+
+    def test_non_finite_enrichment_is_refused_unless_excluded(self, toy):
+        loadings, enrichment, annot_size = toy
+        enrichment = enrichment.copy()
+        enrichment["k2"] = np.nan
+        with pytest.raises(ValueError, match="non-finite enrichment"):
+            cs_from_enrichment(loadings, enrichment, annot_size, model="m", trait="t")
+        got = cs_from_enrichment(
+            loadings, enrichment, annot_size, model="m", trait="t", exclude=["k2"]
+        )
+        assert got.values.loc["c0"] == pytest.approx(3.0)
+
+    def test_non_positive_annotation_size_is_refused(self, toy):
+        loadings, enrichment, annot_size = toy
+        annot_size = annot_size.copy()
+        annot_size["k1"] = 0.0
+        with pytest.raises(ValueError, match="non-positive annot_size"):
+            cs_from_enrichment(loadings, enrichment, annot_size, model="m", trait="t")
+
+    def test_missing_key_is_named(self, toy):
+        loadings, enrichment, annot_size = toy
+        with pytest.raises(KeyError, match="enrichment has no value"):
+            cs_from_enrichment(loadings, enrichment.drop("k2"), annot_size, model="m", trait="t")
+
+    def test_everything_excluded_is_an_error(self, toy):
+        with pytest.raises(ValueError, match="no key is left"):
+            cs_from_enrichment(*toy, model="m", trait="t", exclude=["k1", "k2"])
+
+    def test_non_dataframe_loadings_are_refused(self, toy):
+        _, enrichment, annot_size = toy
+        with pytest.raises(TypeError, match="cells x keys"):
+            cs_from_enrichment(np.zeros((2, 2)), enrichment, annot_size, model="m", trait="t")
+
+    def test_does_not_share_a_formula_with_the_z_weighted_score(self, toy, results):
+        loadings, enrichment, annot_size = toy
+        ratio = cs_from_enrichment(loadings, enrichment, annot_size, model="m", trait="t")
+        assert ratio.kind is not ScoreKind.Z_WEIGHTED and ratio.null != 0.0

@@ -265,6 +265,11 @@ scores.null    # 0.0  — read this; never hardcode it beside an axis
 scores.label   # "$CS_i$ (z-weighted loading sum)"
 ```
 
+The other score, the SCADS enrichment ratio (`cs_i = Σ_k L_ik a_k e_k / Σ_k L_ik a_k`,
+null 1), is `scads_drvi.scores.cell.cs_from_enrichment(loadings, enrichment, annot_size,
+...)`. It takes each annotation's (shrunk) enrichment and size, with the directional
+loadings as separate ReLU'd columns, and returns a `CellScores` whose `.null` is `1.0`.
+
 ## Import surface
 
 `import scads_drvi` loads nothing heavier than the standard library. Heavy dependencies

@@ -9,8 +9,8 @@ recorded which one produced a given column:
 
 ``ScoreKind.SCADS_RATIO``
     ``cs_i = (sum_k L_ik a_k e_k) / (sum_k L_ik a_k)``. A weighted mean enrichment, with
-    empirical-Bayes shrunk enrichments. **Null is 1.** This is what the scoring stage
-    writes to disk.
+    empirical-Bayes shrunk enrichments. **Null is 1.** :func:`cs_from_enrichment` computes
+    it; the workflow's scoring step writes it to disk.
 
 They are not on the same scale and do not share a null, so a plot that draws a reference
 line at 0 for one and 1 for the other is right both times and wrong if the columns are
@@ -38,6 +38,7 @@ __all__ = [
     "CellScores",
     "factor_weights",
     "cs_from_z",
+    "cs_from_enrichment",
     "read_cell_scores",
     "compare_scores",
 ]
@@ -212,6 +213,85 @@ def cs_from_z(
         factors=tuple(factors),
         weights=weights,
         n_unscored=int(len(results) - len(factors)),
+    )
+
+
+def cs_from_enrichment(
+    loadings: pd.DataFrame,
+    enrichment: pd.Series,
+    annot_size: pd.Series,
+    *,
+    model: str,
+    trait: str,
+    exclude: Iterable[str] = (),
+    chunk_rows: int = 200_000,
+) -> CellScores:
+    """``cs_i = sum_k L_ik a_k e_k / sum_k L_ik a_k`` -- the SCADS enrichment ratio (null 1).
+
+    The score is a mean of the factors' enrichments `e_k`, weighted by how much of cell
+    i's loading sits on each factor and by how large the factor's annotation is (`a_k`;
+    SCADS's variant count, here the annotation's genome-wide ``.l2.M``). A cell with no
+    loading on any scored factor has no defined score: it is ``NaN`` and counted in
+    ``n_unscored`` (never 0, which would read as "measured, and low").
+
+    `loadings` is cells x keys, where each column is one annotation: for a directional
+    factor pass a ReLU'd view per direction (``np.clip(L, 0, None)`` for ``pos``,
+    ``np.clip(-L, 0, None)`` for ``neg``) as separate columns, named like the keys of
+    `enrichment` and `annot_size` (both indexed by key). Scaling a cell's loadings, or
+    every `annot_size`, by a constant leaves the score unchanged.
+
+    `exclude` names keys that get no weight (SCADS drops annotations covering under 0.5%
+    of the genome, whose S-LDSC error estimates are unreliable). Every other key must
+    have a finite `enrichment` and a positive `annot_size`, or this raises naming them:
+    guessing a weight for a bad estimate would move every cell's score.
+
+    `CellScores.weights` holds the numerator weights ``a_k * e_k`` of the scored keys.
+    Computed in row chunks, as :func:`cs_from_z` is.
+    """
+    import pandas as pd
+
+    if not isinstance(loadings, pd.DataFrame):
+        raise TypeError("loadings must be a DataFrame of cells x keys")
+
+    excluded = set(exclude)
+    keys = [k for k in loadings.columns if k not in excluded]
+    if not keys:
+        raise ValueError("no key is left to score: every loadings column is excluded")
+    for name, series in (("enrichment", enrichment), ("annot_size", annot_size)):
+        missing = [k for k in keys if k not in series.index]
+        if missing:
+            raise KeyError(f"{name} has no value for {len(missing)} key(s), e.g. {missing[:5]}")
+
+    e = enrichment.loc[keys].to_numpy(dtype=np.float64)
+    a = annot_size.loc[keys].to_numpy(dtype=np.float64)
+    bad_e = [k for k, v in zip(keys, e, strict=True) if not np.isfinite(v)]
+    bad_a = [k for k, v in zip(keys, a, strict=True) if not (np.isfinite(v) and v > 0)]
+    if bad_e or bad_a:
+        raise ValueError(
+            f"{len(bad_e)} key(s) have a non-finite enrichment (e.g. {bad_e[:3]}) and "
+            f"{len(bad_a)} have a non-positive annot_size (e.g. {bad_a[:3]}); pass them in "
+            "`exclude` to leave them out of the score"
+        )
+
+    numerator_weights = a * e
+    n = len(loadings)
+    out = np.full(n, np.nan, dtype=np.float64)
+    step = max(int(chunk_rows), 1)
+    for start in range(0, n, step):
+        block = loadings.iloc[start : start + step][keys].to_numpy(dtype=np.float64)
+        denominator = block @ a
+        scored = denominator > 0
+        out[start : start + step][scored] = (block @ numerator_weights)[scored] / denominator[scored]
+
+    values = pd.Series(out, index=loadings.index, name="cs")
+    return CellScores(
+        values=values,
+        kind=ScoreKind.SCADS_RATIO,
+        model=model,
+        trait=trait,
+        factors=tuple(keys),
+        weights=numerator_weights,
+        n_unscored=int(np.isnan(out).sum()),
     )
 
 
