@@ -29,6 +29,12 @@ docs/tutorials/.snakemake/
 # from history 2026-09-30).
 docs/tutorials/data/
 
+# Claude Code: per-user and per-session state. (.claude/settings.json is the shared
+# project settings file: commit it on purpose or leave it untracked.)
+.claude/settings.local.json
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+
 # Editors, OS
 .vscode/
 .idea/
