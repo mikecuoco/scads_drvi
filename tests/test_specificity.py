@@ -12,6 +12,7 @@ from scads_drvi.specificity import (
     _moran,
     _row_normalised,
     graph_specificity,
+    same_process_neighbors,
     split_directions,
 )
 
@@ -163,3 +164,46 @@ def test_rejects_bad_input(world):
         graph_specificity(nb, X, control="missing")
     with pytest.raises(ValueError, match="k=99"):
         graph_specificity(nb, X, k=99)
+
+
+def test_split_directions_signed_names_match_the_heatmap_labels():
+    _, names = split_directions(np.zeros((3, 2)), ["DR 0", "DR 1"], naming="signed")
+    assert names == ["DR 0+", "DR 1+", "DR 0-", "DR 1-"]
+    with pytest.raises(ValueError, match="naming"):
+        split_directions(np.zeros((3, 2)), naming="other")
+
+
+def test_spn_aligned_factor_scores_one_and_random_scores_near_zero():
+    rng = np.random.default_rng(0)
+    labels = np.repeat(["a", "b", "c", "d"], 500)
+    aligned = np.repeat(np.arange(4), 500) + 0.1 * rng.random(labels.size)
+    X = pd.DataFrame({"aligned": aligned, "random": rng.random(labels.size)})
+    spn = same_process_neighbors(X, labels)
+    assert list(spn.index) == ["aligned", "random"]
+    assert (spn.loc["aligned"] > 0.99).all()
+    assert (spn.loc["random"].abs() < 0.1).all()
+
+
+def test_spn_matches_the_formula_by_hand():
+    x = np.array([[0.0], [1.0], [2.0], [3.0], [4.0], [5.0]])
+    labels = ["on", "on", "off", "on", "off", "off"]
+    spn = same_process_neighbors(x, labels)
+    # order by x is the input order. "on" cells: 0, 1, 3; f = 0.5.
+    # Pairs from an "on" cell: (0,1) on-on, (1,2) on-off, (3,4) on-off -> P = 1/3.
+    assert spn.loc["0", "on"] == pytest.approx(max(0.0, (1 / 3 - 0.5) / 0.5))
+    # "off" cells 2, 4, 5: pairs (2,3) off-on, (4,5) off-off -> P = 1/2 = f -> 0.
+    assert spn.loc["0", "off"] == pytest.approx(0.0)
+
+
+def test_spn_degenerate_labels_are_nan():
+    spn = same_process_neighbors(np.arange(6.0)[:, None], ["a", "a", "a", "a", "a", "b"])
+    assert np.isnan(spn.loc["0", "b"])  # one cell only
+    all_one = same_process_neighbors(np.arange(4.0)[:, None], ["a"] * 4)
+    assert np.isnan(all_one.loc["0", "a"])  # covers every cell
+
+
+def test_spn_rejects_bad_input():
+    with pytest.raises(ValueError, match="labels"):
+        same_process_neighbors(np.zeros((4, 1)), ["a", "b"])
+    with pytest.raises(ValueError, match="finite"):
+        same_process_neighbors(np.array([[np.nan], [1.0]]), ["a", "b"])
