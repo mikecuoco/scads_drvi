@@ -235,9 +235,7 @@ class TestBoxStats:
 
     def test_bxp_payload_has_the_keys_matplotlib_wants(self):
         payload = box_stats(np.arange(20.0), ["a"] * 20).to_bxp()
-        assert set(payload[0]) == {
-            "label", "med", "q1", "q3", "whislo", "whishi", "fliers"
-        }
+        assert set(payload[0]) == {"label", "med", "q1", "q3", "whislo", "whishi", "fliers"}
 
     def test_order_and_select(self):
         values = np.concatenate([np.zeros(10), np.ones(10) * 5])
@@ -299,17 +297,13 @@ class TestSaveFigure:
 
     def test_single_format_spec(self, tmp_path):
         fig, _ = plt.subplots()
-        written = save_figure(
-            fig, "p", tmp_path, spec=SaveSpec(formats=("png",), dpi={"png": 72})
-        )
+        written = save_figure(fig, "p", tmp_path, spec=SaveSpec(formats=("png",), dpi={"png": 72}))
         assert [p.suffix for p in written] == [".png"]
 
     def test_metadata_is_accepted_by_both_backends(self, tmp_path):
         """The PDF and PNG backends take different key sets and raise on unknown ones."""
         fig, _ = plt.subplots()
-        written = save_figure(
-            fig, "p", tmp_path, metadata=figure_metadata(model="m", trait="t")
-        )
+        written = save_figure(fig, "p", tmp_path, metadata=figure_metadata(model="m", trait="t"))
         assert len(written) == 2
 
     def test_metadata_carries_a_timestamp(self):

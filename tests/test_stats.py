@@ -132,7 +132,11 @@ class TestLegacyComparison:
         p = np.array([0.001, 0.02, 0.049, 0.4, 0.9])
         table = compare_bh(p)
         assert list(table.columns) == [
-            "p", "q_correct", "q_legacy", "delta", "flips_at_05",
+            "p",
+            "q_correct",
+            "q_legacy",
+            "delta",
+            "flips_at_05",
         ]
         assert len(table) == len(p)
         assert table["flips_at_05"].dtype == bool

@@ -101,8 +101,9 @@ def real_pbmc_peaks() -> list[str]:
     return sorted(peaks)
 
 
-def _write_synthetic_score_db(path: Path, region_names: list[str], motif_ids: list[str],
-                              rng: np.random.Generator) -> None:
+def _write_synthetic_score_db(
+    path: Path, region_names: list[str], motif_ids: list[str], rng: np.random.Generator
+) -> None:
     """A small region x motif score Feather file, shaped like the real cisTarget-style
     databases `stream_accumulate` reads: N region columns + a trailing `motifs` column."""
     import pyarrow as pa
@@ -131,8 +132,7 @@ def test_weighted_motif_enrichment_on_real_pbmc_peak_coordinates(tmp_path, real_
     starts = np.maximum(0, coords["start"].to_numpy() + jitter)
     widths = (coords["end"] - coords["start"]).to_numpy()
     db_regions = [
-        f"{c}:{s}-{s + w}"
-        for c, s, w in zip(coords["chrom"], starts, widths, strict=True)
+        f"{c}:{s}-{s + w}" for c, s, w in zip(coords["chrom"], starts, widths, strict=True)
     ]
 
     motif_ids = [f"motif_{i}" for i in range(30)]
@@ -155,7 +155,13 @@ def test_weighted_motif_enrichment_on_real_pbmc_peak_coordinates(tmp_path, real_
     region_names = [r for r, k in zip(region_names, keep, strict=True) if k]
 
     rows, meta = weighted_motif_enrichment(
-        Wr, labels, used_cols, region_names, strata_ix, n_strata, db_path,
+        Wr,
+        labels,
+        used_cols,
+        region_names,
+        strata_ix,
+        n_strata,
+        db_path,
         check_invariance=True,
     )
 
@@ -229,7 +235,13 @@ def test_weighted_motif_enrichment_against_the_real_cistarget_database(real_pbmc
     region_names = [r for r, k in zip(region_names, keep, strict=True) if k]
 
     rows, meta = weighted_motif_enrichment(
-        Wr, labels, used_cols, region_names, strata_ix, n_strata, db_path,
+        Wr,
+        labels,
+        used_cols,
+        region_names,
+        strata_ix,
+        n_strata,
+        db_path,
         check_invariance=True,
     )
 

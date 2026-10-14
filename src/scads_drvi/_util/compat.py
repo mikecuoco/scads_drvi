@@ -27,8 +27,7 @@ def with_factor_column(frame: pd.DataFrame, *, stacklevel: int = 3) -> pd.DataFr
         return frame
     if "dim" in frame.columns:
         warnings.warn(
-            "the 'dim' column is now called 'factor'; rename it (the old name still "
-            "works for now)",
+            "the 'dim' column is now called 'factor'; rename it (the old name still works for now)",
             DeprecationWarning,
             stacklevel=stacklevel,
         )

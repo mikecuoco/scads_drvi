@@ -327,9 +327,7 @@ def risk_manhattan(
 
     fig, ax = plt.subplots(figsize=(max(9.0, 0.4 * len(chroms)), 3.6))
     ax.scatter(x, y, c=colors, s=s, linewidths=0)
-    ax.set_xticks(
-        [offsets[c] + frame.loc[frame["chrom"] == c, "start"].median() for c in chroms]
-    )
+    ax.set_xticks([offsets[c] + frame.loc[frame["chrom"] == c, "start"].median() for c in chroms])
     ax.set_xticklabels(chroms, rotation=90, fontsize=7)
     ax.set_xlabel("genomic position")
     ax.set_ylabel(value_col)

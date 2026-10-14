@@ -242,7 +242,9 @@ def latent_umap_grid(
 
     if directional:
         vmin = [0.0] * len(tmp_df)
-        vmax = list(np.maximum(tmp_df["max"].to_numpy(dtype=float), (min_max_thresholds or (0.0, 0.0))[1]))
+        vmax = list(
+            np.maximum(tmp_df["max"].to_numpy(dtype=float), (min_max_thresholds or (0.0, 0.0))[1])
+        )
     elif min_max_thresholds is not None:
         vmin = list(np.minimum(tmp_df["min"].to_numpy(dtype=float), min_max_thresholds[0]))
         vmax = list(np.maximum(tmp_df["max"].to_numpy(dtype=float), min_max_thresholds[1]))

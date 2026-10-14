@@ -22,16 +22,12 @@ class TestProgress:
         )
 
     def test_log_goes_to_stderr_only(self):
-        proc = self._run(
-            "from scads_drvi._util.progress import log; log('hello')"
-        )
+        proc = self._run("from scads_drvi._util.progress import log; log('hello')")
         assert proc.stdout == ""
         assert proc.stderr.strip() == ">> hello"
 
     def test_log_out_goes_to_stdout_only(self):
-        proc = self._run(
-            "from scads_drvi._util.progress import log_out; log_out('hello')"
-        )
+        proc = self._run("from scads_drvi._util.progress import log_out; log_out('hello')")
         assert proc.stdout.strip() == ">> hello"
         assert proc.stderr == ""
 
@@ -72,10 +68,7 @@ class TestFilesystemType:
         inner = outer / "fast"
         inner.mkdir(parents=True)
         fake = tmp_path / "mounts"
-        fake.write_text(
-            f"srv:/export {outer} nfs4 rw 0 0\n"
-            f"/dev/nvme0n1 {inner} ext4 rw 0 0\n"
-        )
+        fake.write_text(f"srv:/export {outer} nfs4 rw 0 0\n/dev/nvme0n1 {inner} ext4 rw 0 0\n")
         monkeypatch.setattr(advise, "_mounts_file", lambda: fake)
         assert advise.filesystem_type(inner) == "ext4"
         assert advise.filesystem_type(outer) == "nfs4"

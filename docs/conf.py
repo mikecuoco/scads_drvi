@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 try:
     from importlib.metadata import version as _version
+
     release = _version("scads-drvi")
 except Exception:
     release = "0.1.0"
@@ -62,7 +63,13 @@ autodoc_member_order = "bysource"
 # signatures as strings that sphinx-autodoc-typehints resolves at build time; without a
 # real or mocked `anndata` that resolution raises a NameError.
 autodoc_mock_imports = [
-    "torch", "scvi", "drvi", "h5py", "matplotlib", "seaborn", "anndata",
+    "torch",
+    "scvi",
+    "drvi",
+    "h5py",
+    "matplotlib",
+    "seaborn",
+    "anndata",
 ]
 
 # -- intersphinx: resolve cross-refs to upstream docs -------------------------

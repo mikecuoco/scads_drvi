@@ -66,8 +66,8 @@ def test_issubdtype_is_not_used_on_a_pandas_dtype():
             first = call.args[0] if call.args else None
             if isinstance(first, ast.Attribute) and first.attr == "dtype":
                 offenders.append(f"{path.name}:{call.lineno}")
-    assert not offenders, (
-        "np.issubdtype on a pandas dtype raises under pandas 3: " + ", ".join(offenders)
+    assert not offenders, "np.issubdtype on a pandas dtype raises under pandas 3: " + ", ".join(
+        offenders
     )
 
 
@@ -78,9 +78,7 @@ def test_no_inplace_true():
         tree = ast.parse(path.read_text(), filename=str(path))
         for call in _calls(tree):
             for keyword in call.keywords:
-                if keyword.arg == "inplace" and getattr(
-                    keyword.value, "value", False
-                ) is True:
+                if keyword.arg == "inplace" and getattr(keyword.value, "value", False) is True:
                     offenders.append(f"{path.name}:{call.lineno}")
     assert not offenders, "inplace=True under copy-on-write: " + ", ".join(offenders)
 

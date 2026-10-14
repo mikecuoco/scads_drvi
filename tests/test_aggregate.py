@@ -71,9 +71,7 @@ class TestSummarizeBy:
         assert ((wide["ci_high"] - wide["ci_low"]) >= (narrow["ci_high"] - narrow["ci_low"])).all()
 
     def test_quantiles_are_added_on_request(self, values, cells):
-        stats = summarize_by(
-            values, cells, by="grouping", min_cells=1, quantiles=(25, 75)
-        )
+        stats = summarize_by(values, cells, by="grouping", min_cells=1, quantiles=(25, 75))
         assert {"q25", "q75"} <= set(stats.frame.columns)
 
     def test_multiple_grouping_columns(self, values, cells):
@@ -104,17 +102,13 @@ class TestSummarizeBy:
 
 class TestGroupMatrix:
     def test_returns_means_and_counts(self, values, cells):
-        means, counts = group_matrix(
-            values, cells, index="grouping", columns="axis", min_cells=1
-        )
+        means, counts = group_matrix(values, cells, index="grouping", columns="axis", min_cells=1)
         assert means.shape == counts.shape == (3, 2)
         assert counts.to_numpy().sum() == len(cells)
 
     def test_thin_bins_are_nan_in_the_mean_and_visible_in_the_count(self, values, cells):
         """Grey must mean 'no reliable value', never 'measured and low'."""
-        means, counts = group_matrix(
-            values, cells, index="grouping", columns="axis", min_cells=10
-        )
+        means, counts = group_matrix(values, cells, index="grouping", columns="axis", min_cells=10)
         assert means.loc["c"].isna().all()
         assert counts.loc["c"].sum() == 3
 
@@ -232,9 +226,7 @@ class TestProfileByGroup:
         assert counts["c"] == 3
 
     def test_zscore_can_be_disabled(self, matrix, cells):
-        means, z, _ = profile_by_group(
-            matrix, cells["grouping"], min_cells=1, zscore=False
-        )
+        means, z, _ = profile_by_group(matrix, cells["grouping"], min_cells=1, zscore=False)
         pd.testing.assert_frame_equal(means, z)
 
     def test_a_constant_column_does_not_divide_by_zero(self, cells):

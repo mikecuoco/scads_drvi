@@ -180,9 +180,7 @@ class TestAssignPeaks:
             assign_peaks(bim, [])
 
     def test_genome_wide_bim_matches_only_same_chromosome_peaks(self):
-        bim = pd.concat(
-            [make_snp_bim("1", [150]), make_snp_bim("2", [150])], ignore_index=True
-        )
+        bim = pd.concat([make_snp_bim("1", [150]), make_snp_bim("2", [150])], ignore_index=True)
         peaks = ["chr1:100-200", "chr2:100-200"]
         got = assign_peaks(bim, peaks)
         assert got.iloc[0] == "chr1:100-200"

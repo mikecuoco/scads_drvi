@@ -129,9 +129,9 @@ def factor_weights(
     factors = renamed_kwarg(factors, dims, new="factors", old="dims")
     if factors is None:
         raise TypeError("factor_weights() missing required keyword argument: 'factors'")
-    factor_column = renamed_kwarg(
-        factor_column, dim_column, new="factor_column", old="dim_column"
-    ) or "factor"
+    factor_column = (
+        renamed_kwarg(factor_column, dim_column, new="factor_column", old="dim_column") or "factor"
+    )
     factors = list(factors)
     if column not in results.columns:
         raise KeyError(f"{column!r} not in results; columns are {list(results.columns)}")
@@ -281,7 +281,9 @@ def cs_from_enrichment(
         block = loadings.iloc[start : start + step][keys].to_numpy(dtype=np.float64)
         denominator = block @ a
         scored = denominator > 0
-        out[start : start + step][scored] = (block @ numerator_weights)[scored] / denominator[scored]
+        out[start : start + step][scored] = (block @ numerator_weights)[scored] / denominator[
+            scored
+        ]
 
     values = pd.Series(out, index=loadings.index, name="cs")
     return CellScores(

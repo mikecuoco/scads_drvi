@@ -81,7 +81,9 @@ class TestPeakRisk:
     def test_risk_rate_is_loading_times_tau(self, feature_loadings, results):
         risk = peak_risk(feature_loadings, results)
         row = risk[
-            (risk["peak"] == "1:100-200") & (risk["factor"] == "dim_0") & (risk["direction"] == "pos")
+            (risk["peak"] == "1:100-200")
+            & (risk["factor"] == "dim_0")
+            & (risk["direction"] == "pos")
         ]
         assert row["loading"].iloc[0] == pytest.approx(0.5)
         assert row["tau"].iloc[0] == pytest.approx(2.0)
@@ -91,7 +93,9 @@ class TestPeakRisk:
         counts = peak_snp_counts(["1:100-200", "1:300-400"], bim)
         risk = peak_risk(feature_loadings, results, snp_counts=counts)
         row = risk[
-            (risk["peak"] == "1:300-400") & (risk["factor"] == "dim_0") & (risk["direction"] == "neg")
+            (risk["peak"] == "1:300-400")
+            & (risk["factor"] == "dim_0")
+            & (risk["direction"] == "neg")
         ]
         # loading=0.9, tau=1.0 -> risk_rate=0.9; 3 overlapping SNPs -> risk_total=2.7
         assert row["risk_rate"].iloc[0] == pytest.approx(0.9)
@@ -105,14 +109,18 @@ class TestPeakRisk:
         risk = peak_risk(feature_loadings, results)
         # dim_0/pos has loading 0.0 at "1:300-400" -- must not appear
         hit = risk[
-            (risk["peak"] == "1:300-400") & (risk["factor"] == "dim_0") & (risk["direction"] == "pos")
+            (risk["peak"] == "1:300-400")
+            & (risk["factor"] == "dim_0")
+            & (risk["direction"] == "pos")
         ]
         assert hit.empty
 
     def test_include_zero_keeps_zero_loadings(self, feature_loadings, results):
         risk = peak_risk(feature_loadings, results, include_zero=True)
         hit = risk[
-            (risk["peak"] == "1:300-400") & (risk["factor"] == "dim_0") & (risk["direction"] == "pos")
+            (risk["peak"] == "1:300-400")
+            & (risk["factor"] == "dim_0")
+            & (risk["direction"] == "pos")
         ]
         assert len(hit) == 1
         assert hit["loading"].iloc[0] == 0.0
@@ -125,8 +133,12 @@ class TestPeakRisk:
 
     def test_all_zero_is_refused(self, results):
         all_zero = {
-            "pos": pd.DataFrame({"dim_0": [0.0, 0.0], "dim_1": [0.0, 0.0]}, index=["1:100-200", "1:300-400"]),
-            "neg": pd.DataFrame({"dim_0": [0.0, 0.0], "dim_1": [0.0, 0.0]}, index=["1:100-200", "1:300-400"]),
+            "pos": pd.DataFrame(
+                {"dim_0": [0.0, 0.0], "dim_1": [0.0, 0.0]}, index=["1:100-200", "1:300-400"]
+            ),
+            "neg": pd.DataFrame(
+                {"dim_0": [0.0, 0.0], "dim_1": [0.0, 0.0]}, index=["1:100-200", "1:300-400"]
+            ),
         }
         with pytest.raises(ValueError, match="no nonzero loadings"):
             peak_risk(all_zero, results)

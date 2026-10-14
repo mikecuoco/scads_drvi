@@ -39,7 +39,7 @@ _BASE_URL = "https://resources.aertslab.org/cistarget/databases"
 SCREEN_DATABASES: dict[tuple[str, str], _DatabaseSpec] = {
     ("hg38", "v10_clust"): {
         "url": f"{_BASE_URL}/homo_sapiens/hg38/screen/mc_v10_clust/region_based/"
-               "hg38_screen_v10_clust.regions_vs_motifs.scores.feather",
+        "hg38_screen_v10_clust.regions_vs_motifs.scores.feather",
         "size": 13_882_267_682,
         "sha256": "9dfaf815b6f9c923f9161a8148cb973838416510b37446cac447245f20bfe574",
     },
