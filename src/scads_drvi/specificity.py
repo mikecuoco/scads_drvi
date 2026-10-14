@@ -40,6 +40,9 @@ Two optional reference rows ride along: ``_perm_control`` (a caller-chosen colum
 cells permuted -- same marginal, structure destroyed; expect I ~ 0, specificity ~ 0) and
 ``_covariate`` (how much of the covariate the graph itself carries).
 
+:func:`same_process_neighbors` is the DRVI paper's label-based score, for comparison: it
+asks whether a factor's own ordering keeps one label's cells together, with no cell graph.
+
 Ported from the SCADS capsule's ``code/04_factorize/factor_graph_specificity.py``
 (``stage_score``) and ``code/common/embed_metrics.py:moran_i``; graph construction,
 approximate-kNN recall and file I/O stay with the caller.
@@ -48,7 +51,7 @@ approximate-kNN recall and file I/O stay with the caller.
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -57,21 +60,28 @@ import scipy.sparse as sp
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
 
-__all__ = ["split_directions", "graph_specificity"]
+__all__ = ["split_directions", "graph_specificity", "same_process_neighbors"]
 
 PERM_CONTROL = "_perm_control"
 COVARIATE = "_covariate"
 
 
 def split_directions(
-    X: npt.ArrayLike, names: Sequence[Hashable] | None = None
+    X: npt.ArrayLike,
+    names: Sequence[Hashable] | None = None,
+    *,
+    naming: Literal["suffix", "signed"] = "suffix",
 ) -> tuple[np.ndarray, list[str]]:
     """A signed latent as its non-negative directional arms, ``[relu(X), relu(-X)]``.
 
     Returns the ``(n, 2m)`` arm matrix and its names, ``"{name}_pos"`` for the first m
     columns and ``"{name}_neg"`` for the last m -- the same convention as
-    :func:`scads_drvi.pl.umap.latent_umap_grid`'s directional split.
+    :func:`scads_drvi.pl.umap.latent_umap_grid`'s directional split. With
+    ``naming="signed"`` the names are ``"{name}+"`` and ``"{name}-"`` instead, the column
+    labels :func:`scads_drvi.pl.factors.latent_heatmap` shows for a directional split.
     """
+    if naming not in ("suffix", "signed"):
+        raise ValueError(f"naming must be 'suffix' or 'signed', got {naming!r}")
     X = np.asarray(X)
     if X.ndim != 2:
         raise ValueError(f"X must be 2-D (cells x factors), got shape {X.shape}")
@@ -79,7 +89,8 @@ def split_directions(
     if len(labels) != X.shape[1]:
         raise ValueError(f"{len(labels)} names for {X.shape[1]} columns")
     arms = np.concatenate([np.maximum(X, 0), np.maximum(-X, 0)], axis=1)
-    return arms, [f"{n}_pos" for n in labels] + [f"{n}_neg" for n in labels]
+    pos, neg = ("_pos", "_neg") if naming == "suffix" else ("+", "-")
+    return arms, [f"{n}{pos}" for n in labels] + [f"{n}{neg}" for n in labels]
 
 
 def _edge_pattern(graph: Any, n: int, k: int | None) -> sp.csr_matrix:
@@ -358,3 +369,76 @@ def graph_specificity(
     df = pd.DataFrame.from_records(records)
     df["k"] = df["k"].astype("Int64")
     return df
+
+
+def same_process_neighbors(
+    X: npt.ArrayLike | pd.DataFrame,
+    labels: npt.ArrayLike,
+    *,
+    names: Sequence[Hashable] | None = None,
+) -> pd.DataFrame:
+    """Same-Process Neighbors (SPN): does a factor's own ordering keep a label's cells together?
+
+    The score of Moinfar & Theis (DRVI, Methods Eq. 9). It needs labels but no cell graph.
+    For one factor column ``x`` and one label ``p`` (a cell is "on" when it carries the
+    label, with frequency ``f``): sort the cells by ``x``, and take each pair of adjacent
+    cells ``(i, j)``. Then::
+
+        SPN = max(0, (P(p_j on | p_i on) - f) / (1 - f))
+
+    0 is chance, 1 is a factor whose order puts every label's cells in one run. It is the
+    excess over chance of an "on" cell's neighbour along the factor being "on" too.
+
+    Differences from :func:`graph_specificity`: the neighbours are adjacent cells along the
+    factor itself, not an independent graph; the label is required; there is no permutation
+    null (the label frequency is subtracted analytically); and the score is clipped at 0.
+
+    Pass the signed factor (the paper's input) when you can. A ReLU'd arm from
+    :func:`split_directions` is exactly 0 for many cells, and a stable sort breaks those ties
+    by cell order, so the score for an arm is only trustworthy when few cells are tied.
+
+    Parameters
+    ----------
+    X
+        ``(n, m)`` factor values, one column per factor (signed or not). A DataFrame
+        supplies its own names.
+    labels
+        ``n`` per-cell labels. Each distinct label is scored as one process. Missing labels
+        count as "off" for every process.
+    names
+        Column labels, defaulting to ``DataFrame`` columns or ``0..m-1``.
+
+    Returns
+    -------
+    A ``factor x label`` frame of SPN values. A label with fewer than 2 cells, or one that
+    covers every cell, is NaN. ``.max(axis=1)`` and ``.idxmax(axis=1)`` give each factor's
+    best score and the label it matches.
+    """
+    import pandas as pd
+
+    if names is None and isinstance(X, pd.DataFrame):
+        names = list(X.columns)
+    Xm = np.asarray(X, dtype=np.float64)
+    if Xm.ndim != 2:
+        raise ValueError(f"X must be 2-D (cells x factors), got shape {Xm.shape}")
+    n, m = Xm.shape
+    if not np.isfinite(Xm).all():
+        raise ValueError("X must be finite")
+    rows = [str(i) for i in range(m)] if names is None else [str(c) for c in names]
+    if len(rows) != m or len(set(rows)) != m:
+        raise ValueError(f"need {m} unique names, got {len(rows)} ({len(set(rows))} unique)")
+    codes, cats = _codes(labels, n, "labels")
+    n_labels = len(cats)
+
+    freq = np.bincount(codes[codes >= 0], minlength=n_labels) / n
+    out = np.full((m, n_labels), np.nan)
+    for c in range(m):
+        ordered = codes[np.argsort(Xm[:, c], kind="stable")]
+        first, second = ordered[:-1], ordered[1:]
+        on_first = np.bincount(first[first >= 0], minlength=n_labels)
+        both_on = np.bincount(first[(first == second) & (first >= 0)], minlength=n_labels)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            cond = both_on / on_first
+            out[c] = np.maximum(0.0, (cond - freq) / (1.0 - freq))
+    out[:, (freq >= 1.0) | (np.bincount(codes[codes >= 0], minlength=n_labels) < 2)] = np.nan
+    return pd.DataFrame(out, index=pd.Index(rows, name="factor"), columns=[str(c) for c in cats])

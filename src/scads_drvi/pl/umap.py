@@ -30,7 +30,6 @@ import numpy as np
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
     from anndata import AnnData
-    from matplotlib.axes import Axes
     from matplotlib.colors import Colormap
     from matplotlib.figure import Figure
 
@@ -108,6 +107,11 @@ def _subsample_embed(embed: AnnData, n: int | None, *, seed: int = SUBSAMPLE_SEE
     return embed[positions].copy()
 
 
+def _relu(x: Any) -> Any:
+    """max(x, 0) for a dense array or a scipy sparse matrix."""
+    return np.maximum(x, 0) if isinstance(x, np.ndarray) else x.maximum(0)
+
+
 def latent_umap_grid(
     embed: AnnData,
     *,
@@ -132,15 +136,18 @@ def latent_umap_grid(
     :data:`scads_drvi.pl.color.SATURATED_RED_BLUE_CMAP`/:data:`~.SATURATED_SKY_CMAP`),
     per-dimension colour limits from `embed.var["min"]`/`["max"]` (widened to
     `min_max_thresholds` rather than this project's own robust percentile limits), a
-    directional split built the same way DRVI builds it -- concatenating a negated copy
-    of `embed` (`ad.concat`), not a temporary ``obs`` column -- and DRVI's own trick of
-    moving each panel's title into the plot itself (`rearrange_titles`) with the
-    negative panel's y-axis (colorbar) flipped and relabelled.
+    directional split built by concatenating two copies of `embed` (`ad.concat`) rather
+    than a temporary ``obs`` column, and DRVI's own trick of moving each panel's title into
+    the plot itself (`rearrange_titles`).
 
     `directional` defaults to `True` -- every factor interpretability plot in this
     package shows split factors by default (see also
     :func:`scads_drvi.pl.factors.latent_heatmap`'s own `directional`); pass
     `directional=False` for the older single-panel-per-dimension view.
+
+    A directional split is ReLU'd, as in :func:`scads_drvi.specificity.split_directions`: the
+    "+" panel shows ``max(x, 0)`` and the "-" panel the magnitude ``max(-x, 0)``, both on a
+    non-negative scale with the same upward colourbar (zero for cells in the other direction).
 
     `dim_subset` still names raw `embed.var_names` (this project's own convention
     throughout), not `title_col` values as DRVI's own `dim_subset` does.
@@ -148,7 +155,6 @@ def latent_umap_grid(
     import anndata as ad
     import pandas as pd
     import scanpy as sc
-    from matplotlib.ticker import FuncFormatter
     from scipy.sparse import _base as sparse_base
 
     from scads_drvi.pl.color import SATURATED_RED_BLUE_CMAP, SATURATED_SKY_CMAP
@@ -202,8 +208,11 @@ def latent_umap_grid(
                 "latent_umap_grid's directional split needs an in-memory ndarray or "
                 f"scipy sparse embed.X; got {type(neg_x).__name__}."
             )
-        neg.X = -neg_x
-        neg_var["min"], neg_var["max"] = -neg_var["max"], -neg_var["min"]
+        pos.X = _relu(neg_x)
+        neg.X = _relu(-neg_x)
+        neg_var["max"] = np.maximum(-neg_var["min"], 0)
+        pos_var["max"] = np.maximum(pos_var["max"], 0)
+        pos_var["min"], neg_var["min"] = 0.0, 0.0
         pos_var["_direction"], neg_var["_direction"] = "+", "-"
         pos_var[title_col] = pos_var[title_col].astype(str) + "+"
         neg_var[title_col] = neg_var[title_col].astype(str) + "-"
@@ -231,7 +240,10 @@ def latent_umap_grid(
     tmp_df = plotted_var.sort_values(order_col)
     cols_to_show = list(tmp_df[title_col])
 
-    if min_max_thresholds is not None:
+    if directional:
+        vmin = [0.0] * len(tmp_df)
+        vmax = list(np.maximum(tmp_df["max"].to_numpy(dtype=float), (min_max_thresholds or (0.0, 0.0))[1]))
+    elif min_max_thresholds is not None:
         vmin = list(np.minimum(tmp_df["min"].to_numpy(dtype=float), min_max_thresholds[0]))
         vmax = list(np.maximum(tmp_df["max"].to_numpy(dtype=float), min_max_thresholds[1]))
     else:
@@ -246,32 +258,17 @@ def latent_umap_grid(
         frameon=False,
         cmap=directional_cmap if directional else cmap,
         vmin=vmin,
-        vcenter=0,
+        vcenter=None if directional else 0,
         vmax=vmax,
         ncols=ncols,
         show=False,
         **kwargs,
     )
-    for i, ax in enumerate(fig.axes[1 : 2 * len(tmp_df) : 2]):
+    for ax in fig.axes[1 : 2 * len(tmp_df) : 2]:
         pos_ax = ax.get_position()
         ax.set_position(
             (pos_ax.x0, pos_ax.y0, pos_ax.width, pos_ax.height * color_bar_rescale_ratio)
         )
-        if directional and tmp_df["_direction"].iloc[i] == "-":
-            ax.invert_yaxis()
-
-            # A formatter, not set_ticks()/set_yticklabels() on ax.get_yticks() --
-            # this colorbar axis isn't autoscaled yet at this point, so freezing its
-            # current (pre-autoscale) ticks produces a degenerate axis transform at
-            # draw time. A formatter defers both the "all ticks are whole numbers"
-            # check and the negation to draw time instead, once ticks are final.
-            def _negate_ticklabel(x: float, _pos: float | None, ax: Axes = ax) -> str:
-                ticks = ax.get_yticks()
-                if all(float(t).is_integer() for t in ticks):
-                    return str(int(-x))
-                return f"{-x:g}"
-
-            ax.yaxis.set_major_formatter(FuncFormatter(_negate_ticklabel))
     if rearrange_titles:
         for ax in fig.axes:
             ax.text(

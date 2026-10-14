@@ -6,6 +6,21 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- `BarSeries.color` also takes a key -> colour mapping/Series or a colormap (colours each bar by value). `latent_heatmap` uses one 7 pt text size for every label, tick and legend.
+- **`specificity.same_process_neighbors`: the DRVI paper's Same-Process-Neighbors (SPN)
+  score.** Sort the cells by a factor, take adjacent pairs, and score the excess over chance
+  of an "on" cell's neighbour being "on" too, per label (Moinfar & Theis, Eq. 9). Needs
+  labels, no cell graph. Returns a factor x label frame.
+- **`pl.factors.BarSeries`: a marginal bar plot for `latent_heatmap`.** `latent_heatmap`
+  takes any number of them as `column_series` (stacked above the heatmap, one value per
+  column), `row_series` (right) and `row_series_left` (left), one value per category or, with
+  `agg=`, per cell. Each can carry error bars (`se`) and BH-significance colouring (`q`).
+  With any of them the function returns a `LatentHeatmapAxes` named tuple.
+- **`latent_heatmap(order="specificity", specificity=...)`** sorts the columns by descending
+  score (keyed by var name or displayed title); **`aggregate="mean"`** draws one row per
+  category (the mean loading over all its cells) instead of one row per cell.
+- **`specificity.split_directions(naming="signed")`** names the arms `"DR 5+"`/`"DR 5-"`, the
+  labels `latent_heatmap`'s directional split shows.
 - **`scores.cell.cs_from_enrichment`: the SCADS enrichment-ratio cell score.**
   `cs_i = sum_k L_ik a_k e_k / sum_k L_ik a_k` (null 1), for the factors' (shrunk)
   enrichments `e_k` and annotation sizes `a_k`. Keys can be excluded (SCADS drops
@@ -27,6 +42,15 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   strategies fork from whichever process calls `.train()`).
 
 ### Changed
+- `pl.umap.latent_umap_grid(directional=True)` now ReLUs the split arms ("+" = max(x, 0), "-" = max(-x, 0)), so both read as non-negative magnitudes; the "-" colourbar is no longer flipped.
+- `pl.factors.factor_correlation(split=...)` adds a second panel for the split (+/-) arms.
+- **`pl.enrichment.heritability_landscape` is two bar panels, not a bar and a volcano.** Left,
+  the raw S-LDSC coefficient `tau` with error bars (`tau_column`, `tau_se_column`); right, the
+  coefficient z-score with the BH line. Same factor order and colours in both. The results
+  frame needs a `Coefficient` column. It still returns `(fig, (ax, ax))`.
+- **`latent_heatmap`'s `heritability*` and `cell_scores*` arguments are deprecated** in favour
+  of `column_series`/`row_series` (see Added). They still work, warn, and keep their old
+  return shapes.
 - **Neutral names for a factor: the `dim` column is now `factor` (non-DRVI decompositions
   have factors, not dims).** `read_results(annot2dim=)` -> `annot2factor=`; the tidy
   results table and `enrich.risk.peak_risk` output carry a `factor` column;
@@ -40,7 +64,7 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   current setuptools.
 - **`pl.factors.latent_heatmap` gains optional heritability/cell-score marginal panels
   and a directional split, rather than a second `latent_heatmap_with_heritability`
-  (kept, unchanged, for callers without an `embed` `AnnData`).** `heritability`/
+  (removed; see Removed below).** `heritability`/
   `heritability_se`/`heritability_q` (per-dim `pd.Series`, reindexed to the heatmap's
   own column order) draw a bar above the heatmap, with error bars and BH-significance
   colouring/boundary lines matching `pl.enrichment.heritability_landscape`.
@@ -236,6 +260,13 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   coefficient columns, so this does not block it, but the enrichment columns should not be
   trusted without separate checking.
 - Peak memory for `h2` is ~8.5 GB and is **not** improved by the port.
+
+### Removed
+- **`pl.factors.latent_heatmap_with_heritability`** (and its private helpers). Use
+  `latent_heatmap` with a heritability `BarSeries` in `column_series`; a caller with a values
+  DataFrame wraps it in an `AnnData` first.
+- **`pl.enrichment.score_by_group`, `grouped_landscape`, `covariate_audit` and
+  `pl.factors.covariate_association`.** The tutorial draws these inline (violin, heatmap, hexbin, bar).
 
 ## [0.1.0] - 2026-09-09
 

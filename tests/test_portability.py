@@ -30,14 +30,10 @@ import matplotlib.pyplot as plt  # noqa: E402
 from scads_drvi.enrich.config import kept_dims, select_factors  # noqa: E402
 from scads_drvi.enrich.ldsc import read_results  # noqa: E402
 from scads_drvi.pl.enrichment import (  # noqa: E402
-    covariate_audit,
-    grouped_landscape,
     heritability_landscape,
-    score_by_group,
     trait_concordance,
 )
 from scads_drvi.pl.factors import latent_dimension_stats, latent_heatmap  # noqa: E402
-from scads_drvi.pl.frugal import box_stats  # noqa: E402
 from scads_drvi.pl.save import save_figure  # noqa: E402
 from scads_drvi.pl.umap import latent_umap_grid  # noqa: E402
 from scads_drvi.scores.aggregate import (  # noqa: E402
@@ -297,12 +293,6 @@ def test_every_figure_draws_and_saves(analysis, tmp_path):
     fig, _ = trait_concordance(arm["results"], traits=list(TRAITS))
     written += save_figure(fig, "02_concordance", outdir)
 
-    fig, _ = covariate_audit(
-        cells, value="score", covariates=["total_reads", "peak_fraction"],
-        log_x=["total_reads"],
-    )
-    written += save_figure(fig, "03_covariates", outdir)
-
     # A plain categorical/continuous embedding scatter is just a scanpy call now --
     # scads_drvi.pl.umap only wraps the per-dimension grid (below), not this.
     fig = sc.pl.embedding(embed, basis="umap", color="fine_type", show=False, return_fig=True)
@@ -313,23 +303,6 @@ def test_every_figure_draws_and_saves(analysis, tmp_path):
     )
     written += save_figure(fig, "04b_score", outdir)
 
-    stats = box_stats(cells["score"], cells["fine_type"].astype(str), min_n=10)
-    fig, _ = score_by_group(
-        stats, group_label="fine_type", value_label=scores.label, null=scores.null,
-        highlight=["vasc_1"],
-    )
-    written += save_figure(fig, "05_by_group", outdir)
-
-    means, counts = group_matrix(
-        scores.values, cells, index="fine_type", columns="tissue",
-        min_cells=10, column_order=list(TISSUES),
-    )
-    fig, _ = grouped_landscape(
-        means, counts, row_label="fine_type", column_label="tissue",
-        value_label=scores.label,
-    )
-    written += save_figure(fig, "06_landscape", outdir)
-
     fig = latent_umap_grid(embed, n=500)
     written += save_figure(fig, "07_latent_umap_grid", outdir)
 
@@ -339,7 +312,7 @@ def test_every_figure_draws_and_saves(analysis, tmp_path):
     fig, _ = latent_heatmap(embed, "fine_type")
     written += save_figure(fig, "09_latent_heatmap", outdir)
 
-    assert len(written) == 20  # ten figures, pdf + png each
+    assert len(written) == 14  # seven figures, pdf + png each
     assert all(p.exists() and p.stat().st_size > 0 for p in written)
 
 

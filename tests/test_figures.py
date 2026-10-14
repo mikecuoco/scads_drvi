@@ -11,28 +11,28 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.colors import to_hex  # noqa: E402
+from matplotlib.container import ErrorbarContainer  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
 ad = pytest.importorskip("anndata")
 pytest.importorskip("scanpy")
 
+from scads_drvi.pl import enrichment as _pl_enrichment  # noqa: E402
 from scads_drvi.pl.enrichment import (  # noqa: E402
-    covariate_audit,
-    grouped_landscape,
+    chrom_sort_key,
     heritability_landscape,
     risk_manhattan,
-    score_by_group,
     trait_concordance,
 )
 from scads_drvi.pl.factors import (  # noqa: E402
-    covariate_association,
+    BarSeries,
+    LatentHeatmapAxes,
     factor_correlation,
     factor_distributions,
     latent_dimension_stats,
     latent_heatmap,
-    latent_heatmap_with_heritability,
 )
-from scads_drvi.pl.frugal import box_stats, box_stats_by_column  # noqa: E402
+from scads_drvi.pl.frugal import box_stats_by_column  # noqa: E402
 from scads_drvi.pl.umap import latent_umap_grid, subsample  # noqa: E402
 from scads_drvi.stats import add_fdr  # noqa: E402
 
@@ -68,6 +68,8 @@ def results():
                     "trait": trait,
                     "factor": f"dim_{k}",
                     "display": f"dim_{k}",
+                    "Coefficient": 1e-8 * rng.normal(loc=1.0, scale=1.5),
+                    "Coefficient_std_error": 1e-8,
                     "Coefficient_z-score": rng.normal(loc=1.0, scale=1.5),
                 }
             )
@@ -159,6 +161,14 @@ class TestLatentUmapGrid:
         fig_plain = latent_umap_grid(embed, directional=False, n=500)
         assert len(fig.axes) == 2 * len(fig_plain.axes)
 
+    def test_split_arms_are_non_negative(self, embed):
+        fig = latent_umap_grid(embed, directional=True, n=500)
+        for i in range(len(fig.axes) // 2):
+            cbar = fig.axes[1 + 2 * i]
+            assert cbar.get_ylim()[0] == 0 and not cbar.yaxis_inverted()
+            scatter = fig.axes[2 * i].collections[0]
+            assert scatter.get_array().min() >= 0
+
     def test_dim_subset_restricts_dims(self, embed):
         fig = latent_umap_grid(embed, dim_subset=["dim_0", "dim_1"], directional=False, n=500)
         assert len(fig.axes) == 2 * 2
@@ -182,10 +192,22 @@ class TestLatentUmapGrid:
 
 class TestEnrichmentFigures:
     def test_heritability_landscape(self, results):
-        fig, (bars, volcano) = heritability_landscape(results, trait="t1")
+        fig, (tau_ax, z_ax) = heritability_landscape(results, trait="t1")
         assert isinstance(fig, Figure)
-        assert bars.get_ylabel() == "coefficient z"
-        assert volcano.get_legend() is not None
+        assert tau_ax.get_ylabel() == "coefficient tau"
+        assert z_ax.get_ylabel() == "coefficient z"
+        assert z_ax.get_legend() is not None
+        n = int((results["trait"] == "t1").sum())
+        assert len(tau_ax.patches) == len(z_ax.patches) == n  # one bar per factor, both panels
+        assert any(isinstance(c, ErrorbarContainer) for c in tau_ax.containers)
+
+    def test_heritability_landscape_tau_error_bars_are_optional(self, results):
+        _, (tau_ax, _) = heritability_landscape(results, trait="t1", tau_se_column=None)
+        assert not any(isinstance(c, ErrorbarContainer) for c in tau_ax.containers)
+
+    def test_heritability_landscape_needs_tau(self, results):
+        with pytest.raises(KeyError, match="Coefficient"):
+            heritability_landscape(results.drop(columns="Coefficient"), trait="t1")
 
     def test_heritability_landscape_needs_fdr_columns(self):
         bare_frame = pd.DataFrame(
@@ -200,12 +222,14 @@ class TestEnrichmentFigures:
 
     def test_heritability_landscape_titles_map_dim_to_dr_names(self):
         rows = [
-            {"trait": "t", "factor": "dim_5", "direction": "pos", "Coefficient_z-score": 3.0},
-            {"trait": "t", "factor": "dim_5", "direction": "neg", "Coefficient_z-score": -1.0},
+            {"trait": "t", "factor": "dim_5", "direction": "pos", "Coefficient": 3e-8,
+             "Coefficient_std_error": 1e-8, "Coefficient_z-score": 3.0},
+            {"trait": "t", "factor": "dim_5", "direction": "neg", "Coefficient": -1e-8,
+             "Coefficient_std_error": 1e-8, "Coefficient_z-score": -1.0},
         ]
         frame = add_fdr(pd.DataFrame(rows), by="trait")
-        fig, (bars, _) = heritability_landscape(frame, trait="t", titles={"dim_5": "DR 6"})
-        assert {t.get_text() for t in bars.texts} == {"DR 6+", "DR 6-"}
+        fig, (_, z_ax) = heritability_landscape(frame, trait="t", titles={"dim_5": "DR 6"})
+        assert {t.get_text() for t in z_ax.texts} == {"DR 6+", "DR 6-"}
 
     def test_trait_concordance(self, results):
         fig, (scatter, hist) = trait_concordance(results, traits=["t1", "t2"])
@@ -250,45 +274,6 @@ class TestEnrichmentFigures:
             pd.DataFrame(rows), traits=["a", "b"], titles={"dim_5": "DR 6"}
         )
         assert {t.get_text() for t in scatter.texts} == {"DR 6+"}
-
-    def test_covariate_audit(self, cells):
-        fig, axes = covariate_audit(
-            cells, value="cs", covariates=["depth"], log_x=["depth"]
-        )
-        assert isinstance(fig, Figure)
-        assert axes[0].get_xlabel() == "log10(depth)"
-
-    def test_covariate_audit_needs_covariates(self, cells):
-        with pytest.raises(ValueError, match="no covariates"):
-            covariate_audit(cells, value="cs", covariates=[])
-
-    def test_score_by_group_takes_only_precomputed_stats(self, cells):
-        """Handing it the per-cell table must be impossible, not merely discouraged."""
-        stats = box_stats(cells["cs"], cells["grouping"])
-        fig, ax = score_by_group(stats, group_label="grouping", null=0.0)
-        assert isinstance(fig, Figure)
-        with pytest.raises(AttributeError):
-            score_by_group(cells, group_label="grouping")
-
-    def test_grouped_landscape_masks_and_says_so(self, cells):
-        from scads_drvi.scores.aggregate import group_matrix
-
-        means, counts = group_matrix(
-            cells["cs"], cells, index="grouping", columns="axis", min_cells=10_000
-        )
-        fig, ax = grouped_landscape(
-            means, counts, row_label="grouping", column_label="axis"
-        )
-        assert isinstance(fig, Figure)
-        label = fig.axes[-1].get_ylabel() or fig.axes[-1].get_xlabel()
-        assert "count threshold" in label
-
-    def test_grouped_landscape_shape_mismatch(self):
-        means = pd.DataFrame(np.zeros((2, 2)))
-        with pytest.raises(ValueError, match="same shape"):
-            grouped_landscape(
-                means, pd.DataFrame(np.zeros((3, 2))), row_label="r", column_label="c"
-            )
 
     @pytest.fixture
     def risk(self):
@@ -375,16 +360,21 @@ class TestFactorFigures:
         )
         assert isinstance(fig, Figure)
 
+    def test_factor_correlation_two_panels(self):
+        rng = np.random.default_rng(1)
+        x = rng.normal(size=(50, 3))
+        signed = pd.DataFrame(x, columns=[f"DR {i}" for i in range(1, 4)])
+        arms = pd.concat(
+            {f: pd.DataFrame({"+": np.clip(signed[f], 0, None), "-": np.clip(-signed[f], 0, None)})
+             for f in signed}, axis=1)
+        arms.columns = [f"{f}{d}" for f, d in arms.columns]
+        fig, (left, right) = factor_correlation(signed.corr(), split=arms.corr(), vanished=["DR 2"])
+        assert len(fig.axes) == 3  # two matrices and one colourbar
+        assert [t.get_text() for t in right.get_xticklabels()].count("DR 2+") <= 1
+
     def test_factor_correlation_needs_square(self):
         with pytest.raises(ValueError, match="square"):
             factor_correlation(pd.DataFrame(np.zeros((2, 3))))
-
-    def test_covariate_association(self):
-        series = pd.Series(
-            [0.9, 0.2, -0.8, 0.1], index=[f"dim_{i}" for i in range(4)]
-        )
-        fig, ax = covariate_association(series, threshold=0.7)
-        assert "2 factor(s)" in ax.get_title()
 
 
 @pytest.fixture
@@ -732,75 +722,191 @@ class TestLatentHeatmap:
         )
 
 
-class TestLatentHeatmapWithHeritability:
+class TestLatentHeatmapSeries:
+    def test_custom_bar_colors_and_one_font_size(self, embed):
+        from matplotlib import colormaps
+        from matplotlib.colors import to_rgba
+
+        keys = [f"DR {i + 1}{d}" for i in range(6) for d in "+-"]
+        z = pd.Series(np.arange(12.0), index=keys)
+        cats = sorted(embed.obs["grouping"].unique())
+        row = pd.Series(np.arange(float(len(cats))), index=cats)
+        fig, axes = latent_heatmap(
+            embed, "grouping", aggregate="mean",
+            column_series=[BarSeries(z, "z", color={k: "#D55E00" for k in keys}),
+                           BarSeries(z, "z2", color=colormaps["viridis"])],
+            row_series=[BarSeries(row, "r", color=dict(zip(cats, ["red"] * len(cats), strict=True)))],
+        )
+        assert to_rgba(axes.columns[0].patches[0].get_facecolor()) == to_rgba("#D55E00")
+        assert to_rgba(axes.rows_right[0].patches[0].get_facecolor()) == to_rgba("red")
+        sizes = {t.get_fontsize() for ax in fig.axes for t in ax.get_xticklabels() + ax.get_yticklabels()}
+        assert sizes == {7.0}
+
+    def test_color_missing_key_and_q_conflict(self, embed):
+        z = pd.Series(1.0, index=[f"DR {i + 1}{d}" for i in range(6) for d in "+-"])
+        with pytest.raises(KeyError, match="no colour"):
+            latent_heatmap(embed, "grouping", column_series=[BarSeries(z, color={"DR 1+": "red"})])
+        with pytest.raises(ValueError, match="significance"):
+            latent_heatmap(embed, "grouping", column_series=[BarSeries(z, q=z, color="red")])
+
+    """The list-based bar series, ``order="specificity"`` and ``aggregate="mean"``."""
+
     @pytest.fixture
-    def values_and_categories(self, dim_stats):
+    def embed_h(self, dim_stats):
         rng = np.random.default_rng(4)
         n = 400
-        values = pd.DataFrame(
-            rng.normal(size=(n, len(dim_stats))),
-            columns=dim_stats.index,
+        x = rng.normal(size=(n, len(dim_stats))).astype(np.float32)
+        obs = pd.DataFrame(
+            {"grouping": rng.choice(["a", "b", "c"], size=n)},
             index=[f"c{i}" for i in range(n)],
         )
-        categories = pd.Series(
-            rng.choice(["a", "b", "c"], size=n), index=values.index
-        )
-        return values, categories
+        return ad.AnnData(X=x, obs=obs, var=dim_stats.copy())
 
-    @pytest.fixture
-    def heritability(self, dim_stats):
-        rng = np.random.default_rng(6)
-        return pd.Series(rng.normal(size=len(dim_stats)), index=dim_stats.index)
+    @staticmethod
+    def _kept(embed_h):
+        return embed_h.var_names[~embed_h.var["vanished"].to_numpy(dtype=bool)]
 
-    def test_returns_fig_and_two_axes(self, values_and_categories, dim_stats, heritability):
-        values, categories = values_and_categories
-        fig, (bar, heat) = latent_heatmap_with_heritability(
-            values, categories, dim_stats, heritability
-        )
-        assert isinstance(fig, Figure)
-        assert bar is not heat
+    def test_no_series_still_returns_the_heatmap_axes_alone(self, embed_h):
+        _, ax = latent_heatmap(embed_h, "grouping", make_balanced=False)
+        assert not isinstance(ax, LatentHeatmapAxes)
 
-    def test_bar_and_heatmap_share_column_order(
-        self, values_and_categories, dim_stats, heritability
-    ):
-        values, categories = values_and_categories
-        _, (bar, heat) = latent_heatmap_with_heritability(
-            values, categories, dim_stats, heritability, remove_vanished=False
+    def test_column_series_stack_upward_in_list_order(self, embed_h):
+        kept = self._kept(embed_h)
+        first = BarSeries(pd.Series(np.arange(len(kept), dtype=float), index=kept), label="a")
+        second = BarSeries(pd.Series(np.ones(len(kept)), index=kept), label="b", size_in=0.6)
+        _, axes = latent_heatmap(
+            embed_h, "grouping", column_series=[first, second], make_balanced=False,
+            directional=False,
         )
-        kept = dim_stats.sort_values("order").index.tolist()
-        np.testing.assert_allclose(
-            [b.get_height() for b in bar.patches], heritability.loc[kept].to_numpy()
-        )
-        assert len(bar.patches) == len(heat.get_xticklabels())
+        assert isinstance(axes, LatentHeatmapAxes)
+        near, far = axes.columns
+        heat = axes.heat.get_position()
+        assert heat.y1 <= near.get_position().y0 < near.get_position().y1
+        assert near.get_position().y1 <= far.get_position().y0  # no overlap
+        assert len(near.patches) == len(far.patches) == len(kept)
+        assert near.get_ylabel() == "a" and far.get_ylabel() == "b"
+        assert near.get_xlim() == axes.heat.get_xlim()  # shares the heatmap's x axis
 
-    def test_missing_heritability_value_raises(
-        self, values_and_categories, dim_stats, heritability
-    ):
-        values, categories = values_and_categories
-        # dim_stats.index[0] is a kept (non-vanished) dim, so dropping it must be seen.
-        with pytest.raises(KeyError, match="heritability has no value"):
-            latent_heatmap_with_heritability(
-                values, categories, dim_stats, heritability.drop(dim_stats.index[0])
+    def test_column_series_may_be_keyed_by_displayed_title(self, embed_h):
+        titles = embed_h.var.loc[self._kept(embed_h), "title"]
+        series = BarSeries(pd.Series(np.arange(len(titles), dtype=float), index=titles.to_numpy()))
+        _, axes = latent_heatmap(
+            embed_h, "grouping", column_series=[series], make_balanced=False, directional=False
+        )
+        assert len(axes.columns[0].patches) == len(titles)
+
+    def test_column_series_with_a_missing_column_is_named(self, embed_h):
+        kept = self._kept(embed_h)
+        series = BarSeries(pd.Series(np.ones(len(kept) - 1), index=kept[1:]), name="tau")
+        with pytest.raises(KeyError, match="tau has no value"):
+            latent_heatmap(
+                embed_h, "grouping", column_series=[series], make_balanced=False,
+                directional=False,
             )
 
-    def test_q_colors_and_draws_significance_legend(
-        self, values_and_categories, dim_stats, heritability
-    ):
-        values, categories = values_and_categories
-        q = pd.Series(
-            np.linspace(0.001, 0.5, len(dim_stats)), index=dim_stats.index
+    def test_row_series_on_both_sides_sit_outside_the_heatmap(self, embed_h):
+        cats = pd.Series({"a": 1.0, "b": 2.0, "c": 3.0})
+        _, axes = latent_heatmap(
+            embed_h, "grouping", make_balanced=False,
+            row_series=[BarSeries(cats, label="r1"), BarSeries(cats * 2, label="r2")],
+            row_series_left=[BarSeries(cats, label="l1", color="#CC0000")],
         )
-        fig, (bar, heat) = latent_heatmap_with_heritability(
-            values, categories, dim_stats, heritability, heritability_q=q
-        )
-        assert bar.legend_ is not None
-        assert bar.lines  # threshold lines drawn
+        heat = axes.heat.get_position()
+        assert len(axes.rows_right) == 2 and len(axes.rows_left) == 1
+        r1, r2 = axes.rows_right
+        assert r1.get_position().x0 >= heat.x1
+        assert r2.get_position().x0 >= r1.get_position().x1  # second is farther out
+        assert axes.rows_left[0].get_position().x1 <= heat.x0
+        assert axes.rows_left[0].xaxis_inverted()  # grows away from the heatmap
+        assert len(r1.patches) == 3
 
-    def test_missing_q_value_raises(self, values_and_categories, dim_stats, heritability):
-        values, categories = values_and_categories
-        q = pd.Series(np.full(len(dim_stats), 0.01), index=dim_stats.index)
-        with pytest.raises(KeyError, match="heritability_q has no value"):
-            latent_heatmap_with_heritability(
-                values, categories, dim_stats, heritability,
-                heritability_q=q.drop(dim_stats.index[0]),
+    def test_row_series_missing_a_category_is_named(self, embed_h):
+        series = BarSeries(pd.Series({"a": 1.0, "b": 2.0}), name="depth")
+        with pytest.raises(KeyError, match="depth has no value"):
+            latent_heatmap(embed_h, "grouping", row_series=[series], make_balanced=False)
+
+    def test_per_cell_row_series_reduce_to_the_group_statistic(self, embed_h):
+        rng = np.random.default_rng(7)
+        per_cell = pd.Series(rng.normal(size=embed_h.n_obs), index=embed_h.obs_names)
+        _, axes = latent_heatmap(
+            embed_h, "grouping", make_balanced=False,
+            row_series=[BarSeries(per_cell, agg="median")],
+        )
+        expected = per_cell.groupby(embed_h.obs["grouping"]).median()
+        actual = sorted(b.get_width() for b in axes.rows_right[0].patches)
+        np.testing.assert_allclose(actual, sorted(expected.to_numpy()))
+
+    def test_order_specificity_sorts_columns_descending(self, embed_h):
+        kept = self._kept(embed_h)
+        score = pd.Series(np.arange(len(kept), dtype=float), index=kept)  # last is highest
+        _, ax = latent_heatmap(
+            embed_h, "grouping", order="specificity", specificity=score,
+            make_balanced=False, directional=False,
+        )
+        shown = [t.get_text() for t in ax.get_xticklabels()]
+        expected = embed_h.var.loc[kept[::-1], "title"].tolist()
+        assert shown == expected
+
+    def test_order_specificity_accepts_titles_and_needs_scores(self, embed_h):
+        kept = self._kept(embed_h)
+        titles = embed_h.var.loc[kept, "title"].to_numpy()
+        score = pd.Series(np.arange(len(kept), dtype=float), index=titles)
+        _, ax = latent_heatmap(
+            embed_h, "grouping", order="specificity", specificity=score,
+            make_balanced=False, directional=False,
+        )
+        assert [t.get_text() for t in ax.get_xticklabels()][0] == titles[-1]
+        with pytest.raises(ValueError, match="needs `specificity`"):
+            latent_heatmap(embed_h, "grouping", order="specificity", make_balanced=False)
+        with pytest.raises(KeyError, match="specificity has no value"):
+            latent_heatmap(
+                embed_h, "grouping", order="specificity", specificity=score.iloc[1:],
+                make_balanced=False, directional=False,
             )
+
+    def test_unknown_order_and_aggregate_are_refused(self, embed_h):
+        with pytest.raises(ValueError, match="order must be"):
+            latent_heatmap(embed_h, "grouping", order="alphabetical")
+        with pytest.raises(ValueError, match="aggregate must be"):
+            latent_heatmap(embed_h, "grouping", aggregate="median")
+
+    def test_aggregate_mean_draws_one_row_per_category_of_group_means(self, embed_h):
+        kept = self._kept(embed_h)
+        _, ax = latent_heatmap(
+            embed_h, "grouping", aggregate="mean", directional=False
+        )
+        image = np.asarray(ax.images[0].get_array())
+        expected = (
+            pd.DataFrame(embed_h[:, kept].X, columns=kept)
+            .groupby(embed_h.obs["grouping"].to_numpy())
+            .mean()
+        )
+        assert image.shape == (3, len(kept))
+        np.testing.assert_allclose(image, expected.to_numpy(), rtol=1e-4, atol=1e-6)
+
+    def test_aggregate_mean_keeps_row_series_per_category(self, embed_h):
+        rng = np.random.default_rng(7)
+        per_cell = pd.Series(rng.normal(size=embed_h.n_obs), index=embed_h.obs_names)
+        _, axes = latent_heatmap(
+            embed_h, "grouping", aggregate="mean",
+            row_series=[BarSeries(per_cell, agg="mean")],
+        )
+        expected = per_cell.groupby(embed_h.obs["grouping"]).mean()  # all cells, not a subsample
+        actual = sorted(b.get_width() for b in axes.rows_right[0].patches)
+        np.testing.assert_allclose(actual, sorted(expected.to_numpy()))
+        assert len(axes.rows_right[0].patches) == 3
+
+    def test_legacy_arguments_warn_and_keep_the_old_return_shape(self, embed_h):
+        scores = pd.Series(np.ones(embed_h.n_obs), index=embed_h.obs_names)
+        with pytest.warns(DeprecationWarning, match="cell_scores"):
+            _, shape = latent_heatmap(
+                embed_h, "grouping", cell_scores=scores, make_balanced=False
+            )
+        assert isinstance(shape, tuple) and len(shape) == 2 and not isinstance(shape, LatentHeatmapAxes)
+
+
+def test_chrom_sort_key_is_public_and_orders_numerically():
+    assert "chrom_sort_key" in _pl_enrichment.__all__
+    assert _pl_enrichment._chrom_sort_key is chrom_sort_key  # private alias kept
+    labels = ["chrX", "chr10", "chr2", "1", "chrM"]
+    assert sorted(labels, key=chrom_sort_key) == ["1", "chr2", "chr10", "chrM", "chrX"]

@@ -9,17 +9,16 @@ heatmap (:func:`latent_heatmap`, ported from ``drvi.utils.pl.plot_latent_dims_in
 -- matching each one's own colours, per-dimension scaling and sampling mechanics exactly
 (see each function's own docstring for where this project's return-value contract and one
 already-fixed layout bug are kept instead), so no `drvi-py` install is needed just to draw
-a figure that looks like DRVI's own. :func:`latent_heatmap_with_heritability` pairs that
-heatmap with a per-dim heritability bar sharing its column order -- a genuinely
-complementary companion panel, unlike
-:func:`scads_drvi.pl.enrichment.heritability_landscape`'s bar+volcano, which collapse to
-the same ranking when the volcano's x-axis is itself a z-score.
+a figure that looks like DRVI's own. :func:`latent_heatmap` also takes any number of
+marginal bar plots (:class:`BarSeries`) on its top, right and left edges -- e.g. a per-factor
+heritability bar sharing its column order.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import numpy as np
 
@@ -29,7 +28,6 @@ if TYPE_CHECKING:  # pragma: no cover
     from matplotlib.axes import Axes
     from matplotlib.colors import Colormap
     from matplotlib.figure import Figure
-    from matplotlib.image import AxesImage
 
     from scads_drvi.pl.frugal import BoxStats
 
@@ -41,10 +39,10 @@ LinkageMethod = Literal["single", "complete", "average", "weighted", "centroid",
 __all__ = [
     "factor_distributions",
     "factor_correlation",
-    "covariate_association",
     "latent_dimension_stats",
     "latent_heatmap",
-    "latent_heatmap_with_heritability",
+    "BarSeries",
+    "LatentHeatmapAxes",
 ]
 
 
@@ -112,81 +110,60 @@ def _cluster_order(matrix: np.ndarray, *, method: LinkageMethod = "average") -> 
     return np.arange(len(matrix))
 
 
-def factor_correlation(
-    correlation: pd.DataFrame,
-    *,
-    vanished: Sequence[str] = (),
-    method: LinkageMethod = "average",
-    cmap: str = "RdBu_r",
-) -> tuple[Figure, Axes]:
-    """Clustered factor-factor correlation, with dead factors greyed rather than hidden.
-
-    Removing vanished factors would make the matrix look cleaner and quietly change what
-    fraction of the model the figure describes.
-    """
-    import matplotlib.pyplot as plt
-
+def _correlation_panel(
+    ax: Axes, correlation: pd.DataFrame, *, dead: set[str], method: LinkageMethod, cmap: str
+) -> Any:
+    """Draw one clustered correlation matrix on `ax`; a trailing +/- is ignored when matching `dead`."""
     if correlation.shape[0] != correlation.shape[1]:
         raise ValueError(f"expected a square matrix, got {correlation.shape}")
 
     matrix = np.nan_to_num(correlation.to_numpy(dtype=float), nan=0.0)
     order = _cluster_order(matrix, method=method)
     labels = correlation.index.astype(str).to_numpy()[order]
-    ordered = matrix[np.ix_(order, order)]
-
-    size = max(4.0, 0.11 * len(labels))
-    fig, ax = plt.subplots(figsize=(size + 1.2, size))
-    image = ax.imshow(ordered, cmap=cmap, vmin=-1.0, vmax=1.0, aspect="equal")
+    image = ax.imshow(matrix[np.ix_(order, order)], cmap=cmap, vmin=-1.0, vmax=1.0, aspect="equal")
     ax.set_xticks(np.arange(len(labels)))
     ax.set_xticklabels(labels, rotation=90, fontsize=5)
     ax.set_yticks(np.arange(len(labels)))
     ax.set_yticklabels(labels, fontsize=5)
-
-    dead = set(str(v) for v in vanished)
-    if dead:
-        for position, label in enumerate(labels):
-            if label in dead:
-                ax.get_xticklabels()[position].set_color("#D55E00")
-                ax.get_yticklabels()[position].set_color("#D55E00")
-
-    fig.colorbar(image, ax=ax, pad=0.02, fraction=0.045).set_label("Pearson r")
-    return fig, ax
+    for position, label in enumerate(labels):
+        if label in dead or label.rstrip("+-") in dead:
+            ax.get_xticklabels()[position].set_color("#D55E00")
+            ax.get_yticklabels()[position].set_color("#D55E00")
+    return image
 
 
-def covariate_association(
-    association: pd.Series,
+def factor_correlation(
+    correlation: pd.DataFrame,
     *,
-    threshold: float = 0.7,
-    ylabel: str = "|Spearman rho|",
-) -> tuple[Figure, Axes]:
-    """Per-factor association with a nuisance covariate, with a concern threshold drawn.
+    split: pd.DataFrame | None = None,
+    vanished: Sequence[str] = (),
+    method: LinkageMethod = "average",
+    cmap: str = "RdBu_r",
+) -> tuple[Figure, Axes | tuple[Axes, Axes]]:
+    """Clustered factor-factor correlation, with dead factors greyed rather than hidden.
 
-    The threshold is an argument because what counts as too much depends on the covariate
-    and the claim being made about the factor.
-
-    `association` is any per-factor score, computed however the caller likes -- for a
-    categorical covariate, ``drvi.utils.metrics.spearman_correlation_score`` (or
-    ``nn_alignment_score`` / ``discrete_scaled_mutual_info_score`` /
-    ``binary_maximum_mutual_information_score``) run against ``embed.X`` is the DRVI-
-    native way to get one; this function only draws it.
+    Removing vanished factors would make the matrix look cleaner and quietly change what
+    fraction of the model the figure describes. Pass the correlation of the directional
+    arms (``"DR 5+"``/``"DR 5-"``) as `split` for a second panel: `correlation` (signed
+    factors) on the left, `split` on the right, each clustered on its own. The return is
+    then ``(fig, (ax_signed, ax_split))``; without `split` it is ``(fig, ax)``.
     """
     import matplotlib.pyplot as plt
 
-    values = association.to_numpy(dtype=float)
-    labels = association.index.astype(str)
-    order = np.argsort(-np.abs(values))
-
-    fig, ax = plt.subplots(figsize=(max(5.0, 0.13 * len(values)), 3.0))
-    colors = ["#D55E00" if abs(v) >= threshold else "#0173B2" for v in values[order]]
-    ax.bar(np.arange(len(values)), np.abs(values[order]), color=colors, width=0.9)
-    ax.axhline(threshold, color="#949494", linestyle=":", linewidth=0.8)
-    ax.set_xticks(np.arange(len(values)))
-    ax.set_xticklabels(labels[order], rotation=90, fontsize=5)
-    ax.set_ylabel(ylabel)
-    ax.set_xlabel("factor, ranked by association")
-    flagged = int((np.abs(values) >= threshold).sum())
-    ax.set_title(f"{flagged} factor(s) at or above {threshold:g}", fontsize=8)
-    return fig, ax
+    dead = {str(v) for v in vanished}
+    panels = [correlation] if split is None else [correlation, split]
+    size = max(4.0, 0.11 * max(len(p) for p in panels))
+    fig, axes = plt.subplots(
+        1, len(panels), figsize=(len(panels) * size + 1.2, size), squeeze=False, layout="constrained"
+    )
+    for ax, panel in zip(axes[0], panels, strict=True):
+        image = _correlation_panel(ax, panel, dead=dead, method=method, cmap=cmap)
+    fig.colorbar(image, ax=list(axes[0]), pad=0.02, fraction=0.045 / len(panels)).set_label("Pearson r")
+    if split is None:
+        return fig, axes[0, 0]
+    axes[0, 0].set_title("signed factors", fontsize=8)
+    axes[0, 1].set_title("split (+/-) arms", fontsize=8)
+    return fig, (axes[0, 0], axes[0, 1])
 
 
 def latent_dimension_stats(
@@ -285,113 +262,6 @@ def latent_dimension_stats(
     return fig, flat[: len(columns)]
 
 
-def _ordered_latent_matrix(
-    values: pd.DataFrame,
-    categories: pd.Series,
-    dim_stats: pd.DataFrame,
-    *,
-    title_col: str,
-    order_col: str,
-    order: Literal["rank", "cluster"],
-    method: LinkageMethod,
-    remove_vanished: bool,
-    balance: int | None,
-    seed: int,
-) -> tuple[np.ndarray, list[str], list[str], list[tuple[str, int, int]]]:
-    """Column order, row grouping and the cells x dims matrix behind a latent heatmap.
-
-    Used by :func:`latent_heatmap_with_heritability`, whose heritability bar panel needs
-    exactly this computation exposed separately so the bar is guaranteed to describe the
-    same dims in the same order as the heatmap under it. :func:`latent_heatmap` itself
-    does not use this -- see its own docstring for why it is a separate, `embed`-based
-    implementation.
-    """
-    import pandas as pd
-
-    from scads_drvi.pl.umap import subsample
-
-    for column in (order_col, title_col):
-        if column not in dim_stats.columns:
-            raise KeyError(f"{column!r} is not a column of dim_stats")
-    if remove_vanished and "vanished" not in dim_stats.columns:
-        raise KeyError('"vanished" is not a column of dim_stats')
-    if order not in ("rank", "cluster"):
-        raise ValueError(f"order must be 'rank' or 'cluster', got {order!r}")
-
-    shared = values.index.intersection(categories.index)
-    if shared.empty:
-        raise ValueError("values and categories share no index")
-    values = values.loc[shared]
-    categories = categories.loc[shared].astype(str)
-
-    dims = dim_stats
-    if remove_vanished:
-        dims = dims.loc[~dims["vanished"].astype(bool)]
-    missing = [d for d in dims.index if d not in values.columns]
-    if missing:
-        raise KeyError(f"dim_stats names dims not present in values: {missing}")
-    values = values[list(dims.index)]
-
-    if order == "rank":
-        dims_ordered = list(dims.sort_values(order_col).index)
-    else:
-        correlation = values.corr().to_numpy(dtype=float)
-        positions = _cluster_order(correlation, method=method)
-        dims_ordered = [values.columns[i] for i in positions]
-
-    cell_frame = pd.DataFrame({"category": categories})
-    if balance is not None:
-        n_groups = cell_frame["category"].nunique()
-        cell_frame = subsample(cell_frame, n=balance * n_groups, seed=seed, stratify="category")
-    cell_frame = cell_frame.sort_values("category", kind="stable")
-    row_order = cell_frame.index
-
-    blocks: list[tuple[str, int, int]] = []
-    start = 0
-    for name, group in cell_frame.groupby("category", sort=False, observed=True):
-        stop = start + len(group)
-        blocks.append((str(name), start, stop))
-        start = stop
-
-    image = values.loc[row_order, dims_ordered].to_numpy(dtype=float)
-    titles = dim_stats.loc[dims_ordered, title_col].astype(str).tolist()
-    return image, dims_ordered, titles, blocks
-
-
-def _draw_latent_heatmap(
-    ax: Axes,
-    image: np.ndarray,
-    titles: list[str],
-    blocks: Sequence[tuple[str, int, int]],
-    *,
-    cmap: Colormap | str,
-) -> AxesImage:
-    """The imshow + shading + block labels shared by both heatmap-drawing entry points."""
-    from scads_drvi.pl.color import robust_norm
-
-    for slot, (_, span_start, span_stop) in enumerate(blocks):
-        if slot % 2 == 0:
-            ax.axhspan(span_start - 0.5, span_stop - 0.5, color="#F2F2F2", zorder=0)
-
-    norm = robust_norm(image, symmetric=True)
-    im = ax.imshow(image, cmap=cmap, norm=norm, aspect="auto", zorder=2)
-    ax.set_xticks(np.arange(len(titles)))
-    ax.set_xticklabels(titles, rotation=90, fontsize=6)
-    ax.set_yticks([])
-    ax.set_ylabel("cells (grouped by category)")
-
-    for name, span_start, span_stop in blocks:
-        ax.text(
-            len(titles) - 0.4,
-            (span_start + span_stop - 1) / 2.0,
-            name,
-            va="center",
-            ha="left",
-            fontsize=7,
-        )
-    return im
-
-
 def _balanced_rows(categories: pd.Series, *, min_count: int = 10, seed: int = 0) -> np.ndarray:
     """DRVI's own ``make_balanced_subsample``, ported exactly: every category
     contributes the same count -- the smallest category's size, floored at
@@ -462,6 +332,243 @@ def _directional_split(embed: AnnData, *, title_col: str | None, order_col: str 
     )
 
 
+@dataclass(frozen=True)
+class BarSeries:
+    """One marginal bar plot of a :func:`latent_heatmap`.
+
+    `values` is a Series. In ``column_series`` it holds one value per heatmap column, keyed
+    by the column's var name or its displayed title (``"DR 5+"``). In ``row_series`` and
+    ``row_series_left`` it holds one value per category of the heatmap's
+    ``categorical_column`` -- or, with `agg`, one value per cell (indexed like
+    ``embed.obs_names``), reduced per category by that statistic.
+
+    `q` (same index as `values`) colours the bars by BH significance and draws the
+    boundary line at level `alpha`, as :func:`scads_drvi.pl.enrichment.heritability_landscape`
+    does. `se` (same index) draws error bars; with `agg` the standard error is computed from
+    the cells instead -- of the mean or median, or of the sum (``sqrt(n) * std``, the
+    un-normalised total rather than a per-cell average). `color` is a fixed colour, a mapping or
+    Series of colours keyed like `values` (a column series: var name or title; a row series:
+    category), or a matplotlib colormap that colours each bar by its value; for a row series
+    the default is the category palette (``"group"``). A column series with `q` is coloured by
+    significance, so it cannot also take `color`. `size_in` is the bar panel's thickness in
+    inches. `name` only labels error messages.
+    """
+
+    values: pd.Series
+    label: str = ""
+    se: pd.Series | None = None
+    q: pd.Series | None = None
+    color: str | Mapping[str, str] | pd.Series | Colormap | None = None
+    agg: Literal["mean", "median", "sum"] | None = None
+    size_in: float = 1.0
+    alpha: float = 0.05
+    name: str = ""
+
+
+class LatentHeatmapAxes(NamedTuple):
+    """The axes of a :func:`latent_heatmap` that was given bar series, in the order given."""
+
+    heat: Axes
+    columns: list[Axes]
+    rows_left: list[Axes]
+    rows_right: list[Axes]
+
+
+_BAR_GAP_IN = 0.08
+_FONT_PT = 7  # one text size for every label, tick and legend of a latent_heatmap figure
+_AGG_FUNCTIONS: dict[str, Callable[[np.ndarray], Any]] = {
+    "mean": np.mean,
+    "median": np.median,
+    "sum": np.sum,
+}
+
+
+def _align(series: pd.Series, keys: Sequence[Any], *, what: str, unit: str) -> np.ndarray:
+    """`series` reindexed to `keys` as floats, or a ``KeyError`` naming what is missing."""
+    missing = [k for k in keys if k not in series.index]
+    if missing:
+        raise KeyError(
+            f"{what} has no value for {len(missing)} of the heatmap's {unit}(s), e.g. {missing[:5]}"
+        )
+    return series.loc[list(keys)].to_numpy(dtype=float)
+
+
+def _align_columns(
+    series: pd.Series, ordered_var: pd.DataFrame, title_col: str | None, *, what: str
+) -> np.ndarray:
+    """`series` in the heatmap's column order, keyed by var name or by displayed title."""
+    keys = list(ordered_var.index)
+    if title_col is not None and not all(k in series.index for k in keys):
+        titles = ordered_var[title_col].astype(str).tolist()
+        if all(t in series.index for t in titles):
+            return series.loc[titles].to_numpy(dtype=float)
+    return _align(series, keys, what=what, unit="factor")
+
+
+def _bar_colors(
+    color: Any, keys: Sequence[Any], values: np.ndarray, *, default: Any, alt_keys: Sequence[Any] | None = None,
+    name: str = "",
+) -> Any:
+    """Per-bar colours from a BarSeries `color`: a colour, a key -> colour mapping, or a colormap."""
+    from matplotlib.colors import Colormap, Normalize
+
+    if color is None or (isinstance(color, str) and color == "group"):
+        return default
+    if isinstance(color, str):
+        return color
+    if isinstance(color, Colormap):
+        finite = values[np.isfinite(values)]
+        norm = Normalize(finite.min(), finite.max()) if finite.size else Normalize(0, 1)
+        return [color(norm(v)) if np.isfinite(v) else "#BBBBBB" for v in values]
+    lookup = dict(color)
+    out, missing = [], []
+    for i, key in enumerate(keys):
+        for candidate in (key, None if alt_keys is None else alt_keys[i]):
+            if candidate in lookup:
+                out.append(lookup[candidate])
+                break
+        else:
+            missing.append(key)
+    if missing:
+        raise KeyError(f"{name or 'color'} has no colour for {len(missing)} bar(s), e.g. {missing[:5]}")
+    return out
+
+
+def _unify_fonts(fig: Figure) -> None:
+    """Give every tick label, axis label and legend entry of `fig` the same size (scanpy's own
+    heatmap axes use their own defaults, which otherwise differ from the marginal bars')."""
+    for ax in fig.axes:
+        ax.tick_params(axis="both", labelsize=_FONT_PT)
+        ax.xaxis.label.set_fontsize(_FONT_PT)
+        ax.yaxis.label.set_fontsize(_FONT_PT)
+        legend = ax.get_legend()
+        if legend is not None:
+            for text in legend.get_texts():
+                text.set_fontsize(_FONT_PT)
+
+
+def _series_name(series: BarSeries, kind: str, i: int) -> str:
+    return series.name or series.label or f"{kind}[{i}]"
+
+
+def _per_category(
+    series: BarSeries,
+    obs: pd.DataFrame,
+    categorical_column: str,
+    cat_order: Sequence[str],
+    *,
+    name: str,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """A row series' value (and error) per category, in `cat_order`."""
+    if series.agg is None:
+        values = _align(series.values, cat_order, what=name, unit="category")
+        se = None
+        if series.se is not None:
+            se = _align(series.se, cat_order, what=f"{name}_se", unit="category")
+        return values, se
+
+    if series.agg not in _AGG_FUNCTIONS:
+        raise ValueError(
+            f"agg (cell_score_agg) must be 'mean', 'median' or 'sum', got {series.agg!r}"
+        )
+    cells = _align(series.values, list(obs.index), what=name, unit="cell")
+    cats = obs[categorical_column].astype(str).to_numpy()
+    groups = [cells[cats == cat] for cat in cat_order]
+    agg = _AGG_FUNCTIONS[series.agg]
+    values = np.array([agg(g) if len(g) else np.nan for g in groups])
+    # Standard error of the mean for "mean"/"median" (an average estimate); of the *sum* --
+    # sqrt(n) * std, not std / sqrt(n) -- for "sum", the un-normalised total a group's cells
+    # contribute rather than a per-cell average.
+    def _factor(n: int) -> float:
+        return float(np.sqrt(n)) if series.agg == "sum" else 1.0 / float(np.sqrt(n))
+
+    se = np.array([g.std(ddof=1) * _factor(len(g)) if len(g) > 1 else 0.0 for g in groups])
+    return values, se
+
+
+def _specificity_order(
+    var: pd.DataFrame, specificity: pd.Series | None, title_col: str | None
+) -> np.ndarray:
+    """Column positions sorted by descending `specificity` (NaN last); ties keep var order."""
+    if specificity is None:
+        raise ValueError('order="specificity" needs `specificity`, a Series of one score per column')
+    score = _align_columns(specificity, var, title_col, what="specificity")
+    return np.argsort(-np.where(np.isnan(score), -np.inf, score), kind="stable")
+
+
+def _draw_column_bar(
+    fig: Figure, heat: Axes, rect: tuple[float, float, float, float], series: BarSeries, values: np.ndarray, *,
+    se: np.ndarray | None, q: np.ndarray | None, colors: Any = None,
+) -> Axes:
+    from matplotlib.ticker import MaxNLocator
+
+    from scads_drvi.pl.color import (
+        DEFAULT_RAMP,
+        Z_HIGH_CONFIDENCE,
+        Z_NOMINAL_ONE_TAILED,
+        add_threshold_lines,
+        significance_colors,
+        significance_handles,
+    )
+    from scads_drvi.stats import bh_threshold_z
+
+    bar = fig.add_axes(rect, sharex=heat)
+    if q is not None:
+        colors = significance_colors(q, ramp=DEFAULT_RAMP)
+    elif colors is None:
+        colors = "#0173B2"
+    bar.bar(
+        np.arange(len(values)), values, yerr=se, color=colors, width=0.9, zorder=2,
+        error_kw={"ecolor": "0.2", "elinewidth": 0.8, "capsize": 2},
+    )
+    bar.axhline(0, color="0.3", lw=0.6, zorder=1)
+    for spine in ("top", "right", "bottom"):
+        bar.spines[spine].set_visible(False)
+    bar.tick_params(axis="x", bottom=False, labelbottom=False)
+    bar.tick_params(axis="y", labelsize=_FONT_PT, length=2)
+    bar.yaxis.set_major_locator(MaxNLocator(nbins=3))
+    bar.set_ylabel(series.label, fontsize=_FONT_PT)
+    bar.margins(x=0)
+    if q is not None:
+        add_threshold_lines(
+            bar,
+            z=(Z_NOMINAL_ONE_TAILED, Z_HIGH_CONFIDENCE),
+            axis="y",
+            bh=bh_threshold_z(q, values, alpha=series.alpha),
+            alpha=series.alpha,
+        )
+        # Outside the axes, right of the last column: inside it covers the tallest bars.
+        bar.legend(
+            handles=significance_handles(DEFAULT_RAMP), frameon=False, fontsize=_FONT_PT,
+            loc="lower left", bbox_to_anchor=(1.01, 0.0), borderaxespad=0,
+        )
+    return bar
+
+
+def _draw_row_bar(
+    fig: Figure, heat: Axes, rect: tuple[float, float, float, float], series: BarSeries, values: np.ndarray, *,
+    se: np.ndarray | None, mids: np.ndarray, heights: np.ndarray, colors: Any, left: bool,
+) -> Axes:
+    from matplotlib.ticker import MaxNLocator
+
+    bar = fig.add_axes(rect, sharey=heat)
+    bar.barh(
+        mids, values, xerr=se, height=heights, color=colors, zorder=2,
+        error_kw={"ecolor": "0.2", "elinewidth": 0.8, "capsize": 2},
+    )
+    bar.axvline(0, color="0.3", lw=0.6, zorder=1)
+    for spine in ("top", "left", "right"):
+        bar.spines[spine].set_visible(False)
+    bar.tick_params(axis="y", left=False, right=False, labelleft=False, labelright=False)
+    bar.tick_params(axis="x", labelsize=_FONT_PT, length=2)
+    bar.xaxis.set_major_locator(MaxNLocator(nbins=3))
+    bar.set_xlabel(series.label, fontsize=_FONT_PT)
+    bar.margins(y=0)
+    if left:
+        bar.invert_xaxis()  # positive values grow away from the heatmap
+    return bar
+
+
 def latent_heatmap(
     embed: AnnData,
     categorical_column: str,
@@ -469,15 +576,20 @@ def latent_heatmap(
     title_col: str | None = "title",
     order_col: str | None = "order",
     sort_by_categorical: bool = False,
-    order: Literal["rank", "cluster"] = "rank",
+    order: Literal["rank", "cluster", "specificity"] = "rank",
+    specificity: pd.Series | None = None,
     method: LinkageMethod = "average",
     make_balanced: bool = True,
     remove_vanished: bool = True,
     directional: bool = True,
+    aggregate: Literal["cells", "mean"] = "cells",
     cmap: Colormap | str | None = None,
     directional_cmap: Colormap | str | None = None,
     figsize: tuple[float, float] | None = None,
     seed: int = 0,
+    column_series: Sequence[BarSeries] = (),
+    row_series: Sequence[BarSeries] = (),
+    row_series_left: Sequence[BarSeries] = (),
     heritability: pd.Series | None = None,
     heritability_se: pd.Series | None = None,
     heritability_q: pd.Series | None = None,
@@ -486,81 +598,85 @@ def latent_heatmap(
     cell_scores: pd.Series | None = None,
     cell_score_agg: Literal["mean", "median", "sum"] = "mean",
     cell_score_label: str = "score",
-) -> tuple[Figure, Axes | tuple[Axes, ...]]:
+) -> tuple[Figure, Axes | LatentHeatmapAxes | tuple[Axes, ...]]:
     """Heatmap of latent dimensions (columns) x cells (rows), grouped by `categorical_column`.
 
-    Ported to call ``scanpy.pl.heatmap`` directly, the same way DRVI's own
+    Calls ``scanpy.pl.heatmap`` directly, the same way DRVI's own
     ``drvi.utils.pl.plot_latent_dims_in_heatmap`` does -- same `embed` input, parameter
-    names and defaults (`title_col`, `order_col`, `sort_by_categorical`,
-    `make_balanced`, `remove_vanished`), DRVI's own ``SaturatedRdBu`` colour scale
-    (`cmap`, default :data:`scads_drvi.pl.color.SATURATED_RED_BLUE_CMAP`) centred at 0
-    and no dendrogram, so it is a comfortable swap-in -- not a hand-rolled
-    ``seaborn.heatmap`` draw with its own category shading/colourbar. `seed` defaults
-    to 0, matching DRVI's own hardcoded ``make_balanced_subsample`` seed (see
-    :func:`_balanced_rows`), so the balanced subsample actually drawn is the same one
-    DRVI's own call draws.
+    names and defaults (`title_col`, `order_col`, `sort_by_categorical`, `make_balanced`,
+    `remove_vanished`), DRVI's own ``SaturatedRdBu`` colour scale (`cmap`) centred at 0 and no
+    dendrogram. `seed` defaults to 0, matching DRVI's own hardcoded ``make_balanced_subsample``
+    seed (see :func:`_balanced_rows`).
 
-    `sort_by_categorical=True` reproduces DRVI's own heuristic exactly (each dimension
-    ordered by which cell holds its largest-magnitude value). `order="cluster"`
-    (ignored when `sort_by_categorical=True`) is this project's own addition instead of
-    DRVI's default rank ordering: hierarchical clustering of the dimensions by
-    correlation, reusing :func:`_cluster_order` (the same clustering
-    :func:`factor_correlation` uses) -- unlike `sort_by_categorical`, it does not depend
-    on the incidental fact that a balanced subsample happens to come out
-    category-blocked.
+    Column order. `order="rank"` is DRVI's explained-share ranking. `order="cluster"` clusters
+    the columns by correlation (:func:`_cluster_order`, as :func:`factor_correlation` does).
+    `order="specificity"` sorts them by descending `specificity`, a Series of one score per
+    column keyed by var name or displayed title (e.g. the ``specificity`` column of
+    :func:`scads_drvi.specificity.graph_specificity`, indexed by
+    ``split_directions(..., naming="signed")``'s names). `sort_by_categorical=True` instead
+    reproduces DRVI's heuristic (each column ordered by which cell holds its largest value) and
+    overrides `order`.
 
-    `directional=True` (the default -- every factor interpretability plot in this
-    module shows split factors by default, matching :func:`scads_drvi.pl.umap.
-    latent_umap_grid`) splits every kept dimension into two columns instead of one --
-    ``"{title}+"``/``"{title}-"``, a ReLU'd positive part (``np.clip(embed.X, 0,
-    None)``) and a ReLU'd negative part (``np.clip(-embed.X, 0, None)``), zero
-    elsewhere -- the same directional split DRVI's own
-    ``get_effect_of_splits_within_distribution(..., directional=True)`` and this
-    package's own `enrich`/`scores` modules already use (see the tutorial's Section 3
-    and `cs_from_z`). Column identity for `heritability`/`heritability_se`/
-    `heritability_q` becomes ``"{dim}+"``/``"{dim}-"`` accordingly (e.g. an LDSC
-    results table's own ``factor`` + ``direction`` columns, both rows per factor, not
-    just one direction pre-selected). Since a ReLU'd split's values are never negative,
-    the heatmap itself switches from `cmap` (DRVI's own diverging ``SaturatedRdBu``,
-    which would waste half its range on values that never occur) to
-    `directional_cmap` (default :data:`scads_drvi.pl.color.SATURATED_JUST_SKY_CMAP`, a
-    one-sided white-to-saturated ramp with no ``vcenter``) -- the same reasoning
-    :func:`scads_drvi.pl.umap.latent_umap_grid` already applies to its own directional
-    panels, though its `directional_cmap` default (`SATURATED_SKY_CMAP`) differs since
-    its split negates whole columns rather than ReLU-ing them, so a panel's values are
-    not guaranteed non-negative the same way. Pass `directional=False` for the older
-    one-column-per-factor, diverging-colour view.
+    `directional=True` (the default) splits every kept dimension into two columns,
+    ``"{title}+"``/``"{title}-"``: a ReLU'd positive part (``np.clip(X, 0, None)``) and a ReLU'd
+    negative part (``np.clip(-X, 0, None)``), the split DRVI's own
+    ``get_effect_of_splits_within_distribution(..., directional=True)`` uses. These values are
+    never negative, so the heatmap uses `directional_cmap` (a one-sided ramp from 0) instead of
+    the diverging `cmap`. Pass `directional=False` for one column per factor.
 
-    Returns `scanpy`'s own ``"heatmap_ax"`` as `ax`; its own category color bar
-    (`"groupby_ax"`) lives on the same `fig` alongside it -- moved to the figure's top
-    right corner instead, when `cell_scores` is also given, so it does not sit
-    sandwiched between the heatmap and the cell-score bar. Passing `heritability`
-    (a per-dim Series, indexed like `embed.var_names` -- or, when `directional=True`,
-    like the doubled ``"{dim}+"``/``"{dim}-"`` index above -- reindexed to this
-    heatmap's own column order) adds a bar above the heatmap -- pass `heritability_se`
-    (same index, e.g. an LDSC `.results` table's own ``Coefficient_std_error``) to draw
-    it with error bars, and `heritability_q`
-    (same index) to colour it by BH-significance and draw its boundary line, as
-    :func:`scads_drvi.pl.enrichment.heritability_landscape` does. Passing `cell_scores`
-    (a per-cell Series indexed like `embed.obs_names`) adds a bar to the right showing
-    each `categorical_column` group's `cell_score_agg` of that score, with an error bar
-    alongside it -- standard error of the mean for `cell_score_agg="mean"` (default) or
-    `"median"`, or of the sum (``sqrt(n) * std``, the un-normalised total rather than a
-    per-cell average -- "non-normalised cell weights") for `"sum"`. One bar per group,
-    not per cell, since `scanpy.pl.heatmap` does not expose the exact per-cell row order
-    it draws with (only the per-group block boundaries, which are fully determined by
-    group order and size). Either or both can be omitted; the return value grows to
-    match: `ax` alone by default, `(bar, ax)` with `heritability` only, `(ax, score)`
-    with `cell_scores` only, `(bar, ax, score)` with both.
+    `aggregate="mean"` draws one row per category -- each cell of the heatmap is that category's
+    mean loading on that column, over all its cells (`make_balanced` is ignored) -- instead of one
+    row per cell.
+
+    Bar series. Each :class:`BarSeries` is a marginal bar plot sharing an axis with the heatmap.
+    `column_series` are stacked upward from the top edge (one value per column);
+    `row_series` are stacked to the right and `row_series_left` to the left (one value per
+    category, or one per cell with ``agg=``). Any number of each; the first in each list is
+    nearest the heatmap. Per-cell series are reduced over the cells actually drawn (the balanced
+    subsample, when `make_balanced`), or over all cells with ``aggregate="mean"``.
+
+    Returns `ax` (``scanpy``'s ``"heatmap_ax"``) alone when no series is given, or a
+    :class:`LatentHeatmapAxes` when any of the three lists is. The old arguments `heritability`
+    (+ `_se`, `_q`, `_label`, `alpha`) and `cell_scores` (+ `_agg`, `_label`) still work for one
+    release: they build a column and a row :class:`BarSeries` and warn. Used alone they keep the
+    old return shape: ``(bar, ax)``, ``(ax, score)`` or ``(bar, ax, score)``.
     """
+    import warnings
+
     import pandas as pd
     import scanpy as sc
     from scipy.sparse import _base as sparse_base
 
     from scads_drvi.pl.color import SATURATED_JUST_SKY_CMAP, SATURATED_RED_BLUE_CMAP
 
+    if order not in ("rank", "cluster", "specificity"):
+        raise ValueError(f"order must be 'rank', 'cluster' or 'specificity', got {order!r}")
+    if aggregate not in ("cells", "mean"):
+        raise ValueError(f"aggregate must be 'cells' or 'mean', got {aggregate!r}")
     cmap = SATURATED_RED_BLUE_CMAP if cmap is None else cmap
     directional_cmap = SATURATED_JUST_SKY_CMAP if directional_cmap is None else directional_cmap
+
+    new_style = bool(column_series or row_series or row_series_left)
+    column_series, row_series = list(column_series), list(row_series)
+    row_series_left = list(row_series_left)
+    if heritability is not None:
+        warnings.warn(
+            "`heritability*` is deprecated: pass `column_series=[BarSeries(...)]`",
+            DeprecationWarning, stacklevel=2,
+        )
+        column_series.insert(0, BarSeries(
+            heritability, label=heritability_label, se=heritability_se, q=heritability_q,
+            alpha=alpha, name="heritability",
+        ))
+    if cell_scores is not None:
+        warnings.warn(
+            "`cell_scores*` is deprecated: pass `row_series=[BarSeries(..., agg=...)]`",
+            DeprecationWarning, stacklevel=2,
+        )
+        row_series.insert(0, BarSeries(
+            cell_scores, label=cell_score_label, agg=cell_score_agg, name="cell_scores",
+        ))
+    has_series = bool(column_series or row_series or row_series_left)
 
     # `.obs`/`.var` are typed `DataFrame | Dataset2D` (scvi-tools' lazy/backed frame) in
     # current anndata stubs; this function only ever handles an ordinary in-memory
@@ -587,7 +703,7 @@ def latent_heatmap(
     if directional:
         embed = _directional_split(embed, title_col=title_col, order_col=order_col)
 
-    if make_balanced:
+    if make_balanced and aggregate == "cells":
         obs = _as_frame(embed.obs, "embed.obs")
         rows = _balanced_rows(obs[categorical_column].astype(str), seed=seed)
         embed = embed[rows]
@@ -603,10 +719,27 @@ def latent_heatmap(
     var = _as_frame(embed.var, "embed.var")
     obs = _as_frame(embed.obs, "embed.obs")
 
+    col = obs[categorical_column]
+    if isinstance(col.dtype, pd.CategoricalDtype):
+        cat_order = [str(c) for c in col.cat.categories]
+    else:
+        cat_order = sorted(col.astype(str).unique())
+
+    # Per-category values of every row series, from the cells as drawn -- BEFORE a mean
+    # collapse replaces them by one row per category.
+    row_values: dict[int, tuple[np.ndarray, np.ndarray | None]] = {}
+    for tag, group in (("row_series", row_series), ("row_series_left", row_series_left)):
+        for i, s in enumerate(group):
+            row_values[id(s)] = _per_category(
+                s, obs, categorical_column, cat_order, name=_series_name(s, tag, i)
+            )
+
     if sort_by_categorical:
         dim_order = np.argsort(np.abs(x).argmax(axis=0))
     elif order == "cluster":
         dim_order = _cluster_order(np.corrcoef(x, rowvar=False), method=method)
+    elif order == "specificity":
+        dim_order = _specificity_order(var, specificity, title_col)
     elif order_col is not None:
         dim_order = np.argsort(var[order_col].to_numpy())
     else:
@@ -617,24 +750,55 @@ def latent_heatmap(
         ordered_var.index if title_col is None else ordered_var[title_col].astype(str)
     )
 
+    column_values: list[tuple[np.ndarray, np.ndarray | None, np.ndarray | None, Any]] = []
+    for i, s in enumerate(column_series):
+        name = _series_name(s, "column_series", i)
+        if isinstance(s.color, str) and s.color == "group":
+            raise ValueError("color='group' is for row series; a column series has no categories")
+        if s.q is not None and s.color is not None:
+            raise ValueError(f"{name}: q colours the bars by significance, so color cannot be set too")
+        z = _align_columns(s.values, ordered_var, title_col, what=name)
+        se = _align_columns(s.se, ordered_var, title_col, what=f"{name}_se") if s.se is not None else None
+        q = _align_columns(s.q, ordered_var, title_col, what=f"{name}_q") if s.q is not None else None
+        colors = _bar_colors(
+            s.color, vars_to_show, z, default=None, alt_keys=list(ordered_var.index), name=name
+        )
+        column_values.append((z, se, q, colors))
+
+    if aggregate == "mean":
+        import anndata as ad
+
+        means = pd.DataFrame(x).groupby(obs[categorical_column].astype(str).to_numpy(), sort=False).mean()
+        means = means.loc[cat_order]
+        group_colors_in = embed.uns.get(f"{categorical_column}_colors")
+        embed = ad.AnnData(
+            X=means.to_numpy(dtype=np.float32),
+            obs=pd.DataFrame(
+                {categorical_column: pd.Categorical(cat_order, categories=cat_order)},
+                index=pd.Index(cat_order, name=None),
+            ),
+            var=var,
+        )
+        if group_colors_in is not None and len(group_colors_in) == len(cat_order):
+            embed.uns[f"{categorical_column}_colors"] = list(group_colors_in)
+        obs = _as_frame(embed.obs, "embed.obs")
+
     if figsize is None:
-        figsize = (10, len(obs[categorical_column].unique()) / 6)
+        n_cat = len(cat_order)
+        figsize = (10, max(2.0, 0.4 * n_cat)) if aggregate == "mean" else (10, n_cat / 6)
 
     # Marginal panels need real inches of their own, not a fraction carved out of
     # `figsize` -- that figsize is sized only for the heatmap itself (as little as a
     # fraction of an inch tall for a handful of categories), so reserving a *fraction*
     # of it would squash both the heatmap and the new panels into nothing.
-    bar_height_in = 1.6
-    score_width_in = 2.0
+    def _extent(group: Sequence[BarSeries]) -> float:
+        return sum(s.size_in + _BAR_GAP_IN for s in group)
+
+    top_in, right_in, left_in = _extent(column_series), _extent(row_series), _extent(row_series_left)
     call_figsize = figsize
-    if heritability is not None or cell_scores is not None:
+    if has_series:
         call_w, call_h = figsize
-        call_h = max(call_h, 2.0)
-        if heritability is not None:
-            call_h += bar_height_in
-        if cell_scores is not None:
-            call_w += score_width_in
-        call_figsize = (call_w, call_h)
+        call_figsize = (call_w + right_in + left_in, max(call_h, 2.0) + top_in)
 
     heatmap_kwargs = (
         {"cmap": directional_cmap, "vmin": 0} if directional else {"cmap": cmap, "vcenter": 0}
@@ -657,319 +821,97 @@ def latent_heatmap(
     )
     heat = axes["heatmap_ax"]
     fig = heat.figure
+    if aggregate == "mean":
+        # scanpy centres each category label at start + size/2 in edge coordinates, but imshow
+        # pixels are centred on integers: with one row per category the labels sit half a row low.
+        for a in fig.axes:
+            ticks = a.get_yticks()
+            if a is not heat and len(a.get_yticklabels()) == len(cat_order) and len(ticks) == len(cat_order):
+                a.set_yticks(ticks - 0.5, [t.get_text() for t in a.get_yticklabels()])
 
-    bar = None
-    score = None
-    gap = 0.012
-    if heritability is not None or cell_scores is not None:
-        import matplotlib.pyplot as plt
-        from matplotlib.ticker import MaxNLocator
+    if not has_series:
+        _unify_fonts(fig)
+        return fig, heat
 
-        adjust: dict[str, float] = {}
-        if heritability is not None:
-            adjust["top"] = 1 - bar_height_in / call_figsize[1]
-        if cell_scores is not None:
-            adjust["right"] = 1 - score_width_in / call_figsize[0]
-        fig.subplots_adjust(**adjust)
-        pos = heat.get_position()
-        # `scanpy.pl.heatmap` draws its own colorbar in a thin axes to the right of
-        # `heat` that it never exposes in the returned dict -- placing `score` right
-        # after `pos.x1` would draw straight over it, so find the true right edge from
-        # every axes scanpy actually created on this figure.
-        right_edge = max(a.get_position().x1 for a in fig.axes)
-
-        if heritability is not None:
-            missing = [d for d in ordered_var.index if d not in heritability.index]
-            if missing:
-                raise KeyError(
-                    f"heritability has no value for {len(missing)} of the heatmap's "
-                    f"factor(s), e.g. {missing[:5]}"
-                )
-            z = heritability.loc[ordered_var.index].to_numpy(dtype=float)
-
-            se = None
-            if heritability_se is not None:
-                missing_se = [d for d in ordered_var.index if d not in heritability_se.index]
-                if missing_se:
-                    raise KeyError(
-                        f"heritability_se has no value for {len(missing_se)} of the "
-                        f"heatmap's factor(s), e.g. {missing_se[:5]}"
-                    )
-                se = heritability_se.loc[ordered_var.index].to_numpy(dtype=float)
-
-            q = None
-            if heritability_q is not None:
-                missing_q = [d for d in ordered_var.index if d not in heritability_q.index]
-                if missing_q:
-                    raise KeyError(
-                        f"heritability_q has no value for {len(missing_q)} of the "
-                        f"heatmap's factor(s), e.g. {missing_q[:5]}"
-                    )
-                q = heritability_q.loc[ordered_var.index].to_numpy(dtype=float)
-
-            from scads_drvi.pl.color import (
-                DEFAULT_RAMP,
-                Z_HIGH_CONFIDENCE,
-                Z_NOMINAL_ONE_TAILED,
-                add_threshold_lines,
-                significance_colors,
-                significance_handles,
-            )
-            from scads_drvi.stats import bh_threshold_z
-
-            bar = fig.add_axes(
-                [pos.x0, pos.y1 + gap, pos.width, 0.97 - (pos.y1 + gap)], sharex=heat
-            )
-            positions = np.arange(len(ordered_var))
-            colors = significance_colors(q, ramp=DEFAULT_RAMP) if q is not None else "#0173B2"
-            bar.bar(
-                positions,
-                z,
-                yerr=se,
-                color=colors,
-                width=0.9,
-                zorder=2,
-                error_kw={"ecolor": "0.2", "elinewidth": 0.8, "capsize": 2},
-            )
-            bar.axhline(0, color="0.3", lw=0.6, zorder=1)
-            for spine in ("top", "right", "bottom"):
-                bar.spines[spine].set_visible(False)
-            bar.tick_params(axis="x", bottom=False, labelbottom=False)
-            bar.tick_params(axis="y", labelsize=6, length=2)
-            bar.yaxis.set_major_locator(MaxNLocator(nbins=3))
-            bar.set_ylabel(heritability_label, fontsize=7)
-            bar.margins(x=0)
-            if q is not None:
-                boundary = bh_threshold_z(q, z, alpha=alpha)
-                add_threshold_lines(
-                    bar,
-                    z=(Z_NOMINAL_ONE_TAILED, Z_HIGH_CONFIDENCE),
-                    axis="y",
-                    bh=boundary,
-                    alpha=alpha,
-                )
-                bar.legend(
-                    handles=significance_handles(DEFAULT_RAMP),
-                    frameon=False,
-                    fontsize=6,
-                    loc="upper right",
-                )
-
-        if cell_scores is not None:
-            if cell_score_agg not in ("mean", "median", "sum"):
-                raise ValueError(
-                    f"cell_score_agg must be 'mean', 'median' or 'sum', got {cell_score_agg!r}"
-                )
-            missing_cells = [c for c in embed.obs_names if c not in cell_scores.index]
-            if missing_cells:
-                raise KeyError(
-                    f"cell_scores has no value for {len(missing_cells)} of the "
-                    f"heatmap's cell(s), e.g. {missing_cells[:5]}"
-                )
-
-            cats = obs[categorical_column].astype(str)
-            col = obs[categorical_column]
-            if isinstance(col.dtype, pd.CategoricalDtype):
-                cat_order = [str(c) for c in col.cat.categories]
-            else:
-                cat_order = sorted(cats.unique())
-            counts = cats.value_counts().reindex(cat_order).fillna(0).to_numpy(dtype=int)
-            edges = np.concatenate([[0], np.cumsum(counts)])
-            agg_fns: dict[Literal["mean", "median", "sum"], Callable[[np.ndarray], Any]] = {
-                "mean": np.mean,
-                "median": np.median,
-                "sum": np.sum,
-            }
-            agg = agg_fns[cell_score_agg]
-            group_values = [
-                cell_scores.loc[cats.index[cats == cat]].to_numpy(dtype=float) for cat in cat_order
-            ]
-            values_by_cat = np.array([agg(v) for v in group_values])
-            # Standard error of the mean for "mean"/"median" (an average estimate);
-            # of the *sum* -- sqrt(n) * std, not std/sqrt(n) -- for "sum", the
-            # un-normalised total a group's cells contribute rather than a per-cell
-            # average ("non-normalised cell weights").
-            if cell_score_agg == "sum":
-                sem_by_cat = np.array(
-                    [v.std(ddof=1) * np.sqrt(len(v)) if len(v) > 1 else 0.0 for v in group_values]
-                )
-            else:
-                sem_by_cat = np.array(
-                    [v.std(ddof=1) / np.sqrt(len(v)) if len(v) > 1 else 0.0 for v in group_values]
-                )
-            mids = (edges[:-1] + edges[1:] - 1) / 2.0
-            heights = (edges[1:] - edges[:-1]) * 0.9
-
-            # Reuse scanpy's own per-category palette (the same colours `groupby_ax`'s
-            # colour blocks were just drawn with) when it set one; scanpy only does this
-            # for an already-categorical `obs` column, so fall back to the default color
-            # cycle otherwise -- still one colour per group, just not guaranteed to match.
-            group_colors = embed.uns.get(f"{categorical_column}_colors")
-            if group_colors is None or len(group_colors) != len(cat_order):
-                cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["#0173B2"])
-                group_colors = [cycle[i % len(cycle)] for i in range(len(cat_order))]
-
-            score = fig.add_axes(
-                [right_edge + gap, pos.y0, 0.97 - (right_edge + gap), pos.height], sharey=heat
-            )
-            score.barh(
-                mids,
-                values_by_cat,
-                xerr=sem_by_cat,
-                height=heights,
-                color=group_colors,
-                zorder=2,
-                error_kw={"ecolor": "0.2", "elinewidth": 0.8, "capsize": 2},
-            )
-            score.axvline(0, color="0.3", lw=0.6, zorder=1)
-            for spine in ("top", "right", "left"):
-                score.spines[spine].set_visible(False)
-            score.tick_params(axis="y", left=False, labelleft=False)
-            score.tick_params(axis="x", labelsize=6, length=2)
-            score.xaxis.set_major_locator(MaxNLocator(nbins=3))
-            score.set_xlabel(cell_score_label, fontsize=7)
-            score.margins(y=0)
-
-            # scanpy's own colorbar sits in a thin axes it never exposes in `axes`,
-            # by default sandwiched between `heat` and `score` -- move it to the
-            # figure's top right corner instead, so it reads as a legend rather than
-            # a squeezed-in extra column.
-            known = set(axes.values()) | {heat, score}
-            if bar is not None:
-                known.add(bar)
-            colorbar_ax = next((a for a in fig.axes if a not in known), None)
-            if colorbar_ax is not None:
-                cb_w, cb_h = 0.05, 0.12
-                colorbar_ax.set_position([0.99 - cb_w, 0.99 - cb_h, cb_w, cb_h])
-
-    if bar is not None and score is not None:
-        return fig, (bar, heat, score)
-    if bar is not None:
-        return fig, (bar, heat)
-    if score is not None:
-        return fig, (heat, score)
-    return fig, heat
-
-
-def latent_heatmap_with_heritability(
-    values: pd.DataFrame,
-    categories: pd.Series,
-    dim_stats: pd.DataFrame,
-    heritability: pd.Series,
-    *,
-    heritability_q: pd.Series | None = None,
-    heritability_label: str = "coefficient z",
-    alpha: float = 0.05,
-    title_col: str = "title",
-    order_col: str = "order",
-    order: Literal["rank", "cluster"] = "rank",
-    method: LinkageMethod = "average",
-    remove_vanished: bool = True,
-    balance: int | None = None,
-    cmap: Colormap | str | None = None,
-    seed: int = 42,
-) -> tuple[Figure, tuple[Axes, Axes]]:
-    """:func:`latent_heatmap`, with a per-dim heritability bar above it, same column order.
-
-    Pairs the interpretability heatmap with an actually complementary panel: which cells
-    drive each factor (below) against how heritability-enriched that same factor is
-    (above) -- rather than :func:`scads_drvi.pl.enrichment.heritability_landscape`'s bar
-    + volcano, whose two panels collapse to the same ranking whenever the volcano's x is
-    already a z-score (its p comes from that same z one-tailed, so -log10(q) is just a
-    monotone function of it; the panels differ only when the x-axis carries information
-    the significance test doesn't, e.g. an unstandardised effect size).
-
-    `heritability` is a per-dim Series indexed like `dim_stats` -- one value per factor,
-    already reduced to whichever direction or summary the caller wants (e.g.
-    ``results.query("direction == 'pos'").set_index("factor")["Coefficient_z-score"]``);
-    this function never derives it and never resolves a pos/neg split itself. It is
-    reindexed to the heatmap's own column order, so the two panels always describe the
-    same factors in the same order regardless of what order `heritability`'s index came
-    in. Pass `heritability_q` (same index) to colour bars by the BH-significance ramp
-    :func:`scads_drvi.pl.enrichment.heritability_landscape` uses and draw its boundary
-    line; omit it for a single plain-coloured bar with no significance lines, when no
-    q-value is available for this `heritability`.
-    """
     import matplotlib.pyplot as plt
 
-    from scads_drvi.pl.color import (
-        DEFAULT_RAMP,
-        SATURATED_RED_BLUE_CMAP,
-        Z_HIGH_CONFIDENCE,
-        Z_NOMINAL_ONE_TAILED,
-        add_threshold_lines,
-        significance_colors,
-        significance_handles,
-    )
-    from scads_drvi.stats import bh_threshold_z
+    adjust: dict[str, float] = {}
+    if column_series:
+        adjust["top"] = 1 - (top_in + 0.05) / call_figsize[1]
+    if row_series:
+        adjust["right"] = 1 - right_in / call_figsize[0]
+    if row_series_left:
+        adjust["left"] = fig.subplotpars.left + left_in / call_figsize[0]
+    fig.subplots_adjust(**adjust)
+    pos = heat.get_position()
+    fig_w, fig_h = call_figsize
+    # `scanpy.pl.heatmap` draws its own category colour bar and colourbar in thin axes it never
+    # exposes in the returned dict -- start the side panels beyond every axes scanpy made.
+    scanpy_axes = list(fig.axes)
+    right_edge = max(a.get_position().x1 for a in scanpy_axes)
+    left_edge = min(a.get_position().x0 for a in scanpy_axes)
+    if row_series_left:
+        # The category names are tick labels of scanpy's colour bar: keep the left panels clear
+        # of them, measuring the rendered extent rather than the axes box.
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        to_fig = fig.transFigure.inverted()
+        left_edge = min(to_fig.transform_bbox(a.get_tightbbox(renderer)).x0 for a in scanpy_axes)
 
-    cmap = SATURATED_RED_BLUE_CMAP if cmap is None else cmap
-
-    image, dims_ordered, titles, blocks = _ordered_latent_matrix(
-        values,
-        categories,
-        dim_stats,
-        title_col=title_col,
-        order_col=order_col,
-        order=order,
-        method=method,
-        remove_vanished=remove_vanished,
-        balance=balance,
-        seed=seed,
-    )
-
-    missing = [d for d in dims_ordered if d not in heritability.index]
-    if missing:
-        raise KeyError(
-            f"heritability has no value for {len(missing)} of the heatmap's factor(s), "
-            f"e.g. {missing[:5]}"
+    column_axes: list[Axes] = []
+    y = pos.y1 + _BAR_GAP_IN / fig_h
+    for s, (z, se, q, bar_colors) in zip(column_series, column_values, strict=True):
+        height = s.size_in / fig_h
+        column_axes.append(
+            _draw_column_bar(fig, heat, (pos.x0, y, pos.width, height), s, z, se=se, q=q, colors=bar_colors)
         )
-    z = heritability.loc[dims_ordered].to_numpy(dtype=float)
+        y += height + _BAR_GAP_IN / fig_h
 
-    q = None
-    if heritability_q is not None:
-        missing_q = [d for d in dims_ordered if d not in heritability_q.index]
-        if missing_q:
-            raise KeyError(
-                f"heritability_q has no value for {len(missing_q)} of the heatmap's "
-                f"factor(s), e.g. {missing_q[:5]}"
-            )
-        q = heritability_q.loc[dims_ordered].to_numpy(dtype=float)
+    group_colors = embed.uns.get(f"{categorical_column}_colors")
+    if group_colors is None or len(group_colors) != len(cat_order):
+        cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["#0173B2"])
+        group_colors = [cycle[i % len(cycle)] for i in range(len(cat_order))]
+    cats = obs[categorical_column].astype(str)
+    counts = cats.value_counts().reindex(cat_order).fillna(0).to_numpy(dtype=int)
+    edges = np.concatenate([[0], np.cumsum(counts)])
+    mids = (edges[:-1] + edges[1:] - 1) / 2.0
+    heights = (edges[1:] - edges[:-1]) * 0.9
 
-    heatmap_height = max(3.0, min(0.02 * image.shape[0], 14.0))
-    bar_height = 1.8
-    width = max(4.0, 0.15 * len(dims_ordered)) + 1.5
-    fig, (bar, heat) = plt.subplots(
-        2,
-        1,
-        figsize=(width, bar_height + heatmap_height),
-        sharex=True,
-        gridspec_kw={"height_ratios": [bar_height, heatmap_height]},
-    )
+    def _row_axes(group: Sequence[BarSeries], *, left: bool) -> list[Axes]:
+        out: list[Axes] = []
+        x0 = left_edge - _BAR_GAP_IN / fig_w if left else right_edge + _BAR_GAP_IN / fig_w
+        for s in group:
+            values, se = row_values[id(s)]
+            width = s.size_in / fig_w
+            x_start = x0 - width if left else x0
+            out.append(_draw_row_bar(
+                fig, heat, (x_start, pos.y0, width, pos.height), s, values, se=se, mids=mids,
+                heights=heights,
+                colors=_bar_colors(s.color, cat_order, values, default=group_colors, name=_series_name(s, "row_series", 0)),
+                left=left,
+            ))
+            x0 = x_start - _BAR_GAP_IN / fig_w if left else x0 + width + _BAR_GAP_IN / fig_w
+        return out
 
-    positions = np.arange(len(dims_ordered))
-    colors = significance_colors(q, ramp=DEFAULT_RAMP) if q is not None else "#0173B2"
-    bar.bar(positions, z, color=colors, width=0.9, zorder=2)
-    bar.set_ylabel(heritability_label)
-    bar.set_xlim(-0.5, len(dims_ordered) - 0.5)
-    plt.setp(bar.get_xticklabels(), visible=False)
-    if q is not None:
-        boundary = bh_threshold_z(q, z, alpha=alpha)
-        add_threshold_lines(
-            bar,
-            z=(Z_NOMINAL_ONE_TAILED, Z_HIGH_CONFIDENCE),
-            axis="y",
-            bh=boundary,
-            alpha=alpha,
-        )
-        bar.legend(
-            handles=significance_handles(DEFAULT_RAMP),
-            frameon=False,
-            fontsize=6,
-            loc="upper right",
-        )
+    rows_right = _row_axes(row_series, left=False)
+    rows_left = _row_axes(row_series_left, left=True)
 
-    im = _draw_latent_heatmap(heat, image, titles, blocks, cmap=cmap)
-    fig.colorbar(im, ax=(bar, heat), pad=0.02, fraction=0.03 / 2).set_label("value")
-    fig.subplots_adjust(hspace=0.05)
-    return fig, (bar, heat)
+    # scanpy's own colourbar sits in a thin axes it never exposes in `axes`, by default
+    # sandwiched between `heat` and the first right panel -- move it to the figure's top right
+    # corner instead, so it reads as a legend rather than a squeezed-in extra column.
+    if row_series:
+        known = set(axes.values()) | {heat} | set(column_axes) | set(rows_right) | set(rows_left)
+        colorbar_ax = next((a for a in fig.axes if a not in known), None)
+        if colorbar_ax is not None:
+            cb_w, cb_h = 0.05, 0.12
+            colorbar_ax.set_position([0.94 - cb_w, 0.99 - cb_h, cb_w, cb_h])
+
+    _unify_fonts(fig)
+    if new_style:
+        return fig, LatentHeatmapAxes(heat, column_axes, rows_left, rows_right)
+    # Legacy arguments alone: the old return shapes.
+    if column_axes and rows_right:
+        return fig, (column_axes[0], heat, rows_right[0])
+    if column_axes:
+        return fig, (column_axes[0], heat)
+    return fig, (heat, rows_right[0])
