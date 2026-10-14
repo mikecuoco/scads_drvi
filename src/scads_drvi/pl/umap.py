@@ -107,6 +107,11 @@ def _subsample_embed(embed: AnnData, n: int | None, *, seed: int = SUBSAMPLE_SEE
     return embed[positions].copy()
 
 
+def _relu(x: Any) -> Any:
+    """max(x, 0) for a dense array or a scipy sparse matrix."""
+    return np.maximum(x, 0) if isinstance(x, np.ndarray) else x.maximum(0)
+
+
 def latent_umap_grid(
     embed: AnnData,
     *,
@@ -203,8 +208,8 @@ def latent_umap_grid(
                 "latent_umap_grid's directional split needs an in-memory ndarray or "
                 f"scipy sparse embed.X; got {type(neg_x).__name__}."
             )
-        pos.X = pos.X.maximum(0) if sparse_base.issparse(pos.X) else np.maximum(pos.X, 0)
-        neg.X = (-neg_x).maximum(0) if sparse_base.issparse(neg_x) else np.maximum(-neg_x, 0)
+        pos.X = _relu(neg_x)
+        neg.X = _relu(-neg_x)
         neg_var["max"] = np.maximum(-neg_var["min"], 0)
         pos_var["max"] = np.maximum(pos_var["max"], 0)
         pos_var["min"], neg_var["min"] = 0.0, 0.0
