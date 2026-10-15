@@ -108,8 +108,9 @@ def _edge_pattern(graph: Any, n: int, k: int | None) -> sp.csr_matrix:
 
     nb = np.asarray(graph)
     if nb.ndim != 2 or nb.shape[0] != n or nb.dtype.kind not in "iu":
-        raise ValueError(f"neighbour indices must be an integer ({n}, k) array, got "
-                         f"{nb.dtype} {nb.shape}")
+        raise ValueError(
+            f"neighbour indices must be an integer ({n}, k) array, got {nb.dtype} {nb.shape}"
+        )
     if k is not None:
         if not 1 <= k <= nb.shape[1]:
             raise ValueError(f"k={k} outside 1..{nb.shape[1]} neighbour columns")
@@ -120,7 +121,8 @@ def _edge_pattern(graph: Any, n: int, k: int | None) -> sp.csr_matrix:
     cols = nb.ravel().astype(np.int64)
     keep = rows != cols
     P = sp.csr_matrix(
-        (np.ones(int(keep.sum()), dtype=np.float32), (rows[keep], cols[keep])), shape=(n, n))
+        (np.ones(int(keep.sum()), dtype=np.float32), (rows[keep], cols[keep])), shape=(n, n)
+    )
     P.sum_duplicates()
     return P
 
@@ -132,7 +134,9 @@ def _row_normalised(P: sp.csr_matrix) -> sp.csr_matrix:
     return sp.csr_matrix(sp.diags(inv.astype(np.float32)) @ P)
 
 
-def _moran(W: sp.csr_matrix, X: np.ndarray, n_perm: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
+def _moran(
+    W: sp.csr_matrix, X: np.ndarray, n_perm: int, seed: int
+) -> tuple[np.ndarray, np.ndarray]:
     """Moran's I per column and its one-sided permutation p (the same permutations for all)."""
     n, m = X.shape
     rng = np.random.default_rng(seed)
@@ -195,8 +199,10 @@ def _participation(W: sp.csr_matrix, X: np.ndarray) -> tuple[np.ndarray, np.ndar
 def _group_shares(codes: np.ndarray, n_groups: int, E: np.ndarray) -> np.ndarray:
     """(n_groups, n_cols) share of each column's footprint mass in each group (code -1 = none)."""
     lab = codes >= 0
-    G = sp.csr_matrix((np.ones(int(lab.sum()), dtype=np.float32),
-                       (codes[lab], np.flatnonzero(lab))), shape=(n_groups, codes.size))
+    G = sp.csr_matrix(
+        (np.ones(int(lab.sum()), dtype=np.float32), (codes[lab], np.flatnonzero(lab))),
+        shape=(n_groups, codes.size),
+    )
     tot = E.sum(0, dtype=np.float64)
     return np.asarray(G @ E, dtype=np.float64) / np.where(tot > 0, tot, 1.0)
 
@@ -311,7 +317,9 @@ def graph_specificity(
         cols.append(cov.astype(np.float32)[:, None])
         refs.append(COVARIATE)
     if set(refs) & set(labels):
-        raise ValueError(f"factor names collide with reference rows {sorted(set(refs) & set(labels))}")
+        raise ValueError(
+            f"factor names collide with reference rows {sorted(set(refs) & set(labels))}"
+        )
     Xa = np.concatenate(cols, axis=1)
     all_labels = labels + refs
 
@@ -347,14 +355,20 @@ def graph_specificity(
             per_k["moran_i_within_group"] = _within_group_moran(P, grp, Xa)
         if cov is not None:
             per_k["moran_i_resid"] = _moran_plain(W, Xr, energy)
-        shares = {key: (_group_shares(codes, len(cats), E), cats)
-                  for key, (codes, cats) in ann.items()}
+        shares = {
+            key: (_group_shares(codes, len(cats), E), cats) for key, (codes, cats) in ann.items()
+        }
         del E
 
         for c, lab in enumerate(all_labels):
             rec: dict[str, Any] = {
-                "factor": lab, "k": kk, "moran_i": mi[c], "moran_p": mp[c],
-                "pr": pr[c], "pr_null": pr_null[c], "specificity": 1.0 - pr[c] / pr_null[c],
+                "factor": lab,
+                "k": kk,
+                "moran_i": mi[c],
+                "moran_p": mp[c],
+                "pr": pr[c],
+                "pr_null": pr_null[c],
+                "specificity": 1.0 - pr[c] / pr_null[c],
             }
             for name in ("moran_i_within_group", "moran_i_resid", "covariate_spearman"):
                 if name in per_k:

@@ -14,6 +14,7 @@ reachable only from an environment that already carries both, so the lazy
 convention the rest of the package follows would buy nothing here.
 tests/test_import_surface.py records the exemption.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
@@ -32,6 +33,7 @@ from scads_drvi._util.progress import log_out as log  # noqa: F401  (re-exported
 # Factor selection (stage 1a)
 # ---------------------------------------------------------------------------
 
+
 def _as_bool(col: pd.Series) -> pd.Series:
     """Coerce a possibly-string boolean column to real bools.
 
@@ -42,8 +44,11 @@ def _as_bool(col: pd.Series) -> pd.Series:
     """
     if col.dtype == bool:
         return col
-    mapped = col.astype(str).str.strip().str.lower().map(
-        {"true": True, "false": False, "1": True, "0": False}
+    mapped = (
+        col.astype(str)
+        .str.strip()
+        .str.lower()
+        .map({"true": True, "false": False, "1": True, "0": False})
     )
     if mapped.isna().any():
         bad = sorted(set(col.astype(str)[mapped.isna()]))
@@ -132,13 +137,10 @@ def select_factors(
             reason = "vanished"
         elif dim in exclude_dims:
             reason = "exclude_dims"
-        rows.append({"dim": dim, "vanished": vanished, "kept": reason == "",
-                     "drop_reason": reason})
+        rows.append({"dim": dim, "vanished": vanished, "kept": reason == "", "drop_reason": reason})
 
     fmap = pd.DataFrame(rows)
-    fmap["annot_index"] = pd.array(
-        [None] * len(fmap), dtype="Int64"
-    )
+    fmap["annot_index"] = pd.array([None] * len(fmap), dtype="Int64")
     fmap.loc[fmap["kept"], "annot_index"] = np.arange(1, int(fmap["kept"].sum()) + 1)
 
     if not fmap["kept"].any():
@@ -159,6 +161,7 @@ def kept_dims(fmap: pd.DataFrame) -> list[str]:
 # The result h5ad -- obs = cells, var = one row per latent dimension, built and
 # written with plain anndata calls at the call site (see the getting-started guide)
 # ---------------------------------------------------------------------------
+
 
 def kept_loadings(embed: AnnData, fmap: pd.DataFrame) -> pd.DataFrame:
     """cells x kept-dims, straight from a result h5ad's signed ``X`` -- no ReLU.

@@ -18,15 +18,39 @@ from conftest import iter_source_files, iter_string_constants
 # boundaries so that, e.g., "region" is fine but "MTG" is not.
 DATASET_TERMS = (
     # cell groupings
-    "subclass", "supertype", "celltype", "cell_type",
+    "subclass",
+    "supertype",
+    "celltype",
+    "cell_type",
     # a specific cell population
-    "immune", "astro", "oligo", "microglia", "excitatory", "inhibitory",
+    "immune",
+    "astro",
+    "oligo",
+    "microglia",
+    "excitatory",
+    "inhibitory",
     # brain regions of one atlas
-    "mtg", "dfc", "v1c", "ang", "fi", "hip", "lec", "mec",
+    "mtg",
+    "dfc",
+    "v1c",
+    "ang",
+    "fi",
+    "hip",
+    "lec",
+    "mec",
     # cohort / phenotype variables
-    "donor", "braak", "adnc", "apoe", "dementia", "alzheimer",
+    "donor",
+    "braak",
+    "adnc",
+    "apoe",
+    "dementia",
+    "alzheimer",
     # studies and datasets
-    "bellenguez", "seaad", "sea_ad", "allen", "gcst",
+    "bellenguez",
+    "seaad",
+    "sea_ad",
+    "allen",
+    "gcst",
 )
 
 _PATTERNS = {t: re.compile(rf"\b{re.escape(t)}\b", re.IGNORECASE) for t in DATASET_TERMS}

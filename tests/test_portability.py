@@ -120,9 +120,7 @@ def analysis(tmp_path_factory):
             "fine_type": pd.Categorical(fine_vals),
             "tissue": pd.Categorical(tissue_vals),
             "cultivar": pd.Categorical(cultivar_vals),
-            "lineage": pd.Categorical(
-                [lineage_of[f] for f in fine_vals], categories=LINEAGES
-            ),
+            "lineage": pd.Categorical([lineage_of[f] for f in fine_vals], categories=LINEAGES),
             "total_reads": reads,
             "reads_in_peaks": in_peaks,
         },
@@ -144,11 +142,14 @@ def analysis(tmp_path_factory):
     model = _FakeModel(z, vanished)
 
     obs_columns = [
-        "fine_type", "tissue", "cultivar", "lineage", "total_reads", "peak_fraction",
+        "fine_type",
+        "tissue",
+        "cultivar",
+        "lineage",
+        "total_reads",
+        "peak_fraction",
     ]
-    embed = ad.AnnData(
-        X=model.get_latent_representation(raw), obs=raw.obs[obs_columns].copy()
-    )
+    embed = ad.AnnData(X=model.get_latent_representation(raw), obs=raw.obs[obs_columns].copy())
     embed.var_names = [f"dim_{i}" for i in range(embed.n_vars)]
     model.set_latent_dimension_stats(embed)
     # A UMAP is set directly from the embed once computed -- no read/reindex step.
@@ -242,18 +243,14 @@ def test_scores_and_aggregation_over_alien_groupings(analysis):
 
     cells = embed.obs
     summary = summarize_by(scores.values, cells, by=["fine_type"], min_cells=10)
-    assert len(summary) == len(
-        [t for lineage in LINEAGES for t in FINE_TYPES[lineage]]
-    )
+    assert len(summary) == len([t for lineage in LINEAGES for t in FINE_TYPES[lineage]])
 
     means, counts = group_matrix(
         scores.values, cells, index="fine_type", columns="tissue", min_cells=10
     )
     assert means.shape == (8, len(TISSUES))
 
-    blocked = summarize_by(
-        scores.values, cells, by=["lineage", "fine_type"], min_cells=10
-    )
+    blocked = summarize_by(scores.values, cells, by=["lineage", "fine_type"], min_cells=10)
     order, blocks = block_order(blocked, group="fine_type", block="lineage")
     # `lineage` is a categorical, so blocks follow its DECLARED order rather than an
     # alphabetical one -- re-sorting would throw away the ordering the dtype records.
@@ -263,9 +260,7 @@ def test_scores_and_aggregation_over_alien_groupings(analysis):
     for lineage, start, stop in blocks:
         assert set(order[start:stop]) == set(FINE_TYPES[lineage])
 
-    rho2 = eta_squared(
-        scores.values.to_numpy(), cells["cultivar"].astype(str).to_numpy()
-    )
+    rho2 = eta_squared(scores.values.to_numpy(), cells["cultivar"].astype(str).to_numpy())
     assert 0.0 <= rho2 <= 1.0
 
 
@@ -298,8 +293,13 @@ def test_every_figure_draws_and_saves(analysis, tmp_path):
     fig = sc.pl.embedding(embed, basis="umap", color="fine_type", show=False, return_fig=True)
     written += save_figure(fig, "04a_groups", outdir)
     fig = sc.pl.embedding(
-        embed, basis="umap", color="score", vmin="p1", vmax="p99.5",
-        show=False, return_fig=True,
+        embed,
+        basis="umap",
+        color="score",
+        vmin="p1",
+        vmax="p99.5",
+        show=False,
+        return_fig=True,
     )
     written += save_figure(fig, "04b_score", outdir)
 

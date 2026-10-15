@@ -30,9 +30,7 @@ def read_bim(path: str | Path) -> pd.DataFrame:
     """
     import pandas as pd
 
-    frame = pd.read_csv(
-        path, sep=r"\s+", header=None, names=list(BIM_COLUMNS), dtype={"SNP": str}
-    )
+    frame = pd.read_csv(path, sep=r"\s+", header=None, names=list(BIM_COLUMNS), dtype={"SNP": str})
     if frame.empty:
         raise ValueError(f"{path} has no variants")
     return frame

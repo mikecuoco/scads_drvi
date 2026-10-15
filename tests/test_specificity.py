@@ -35,16 +35,18 @@ def world():
     nb = knn(Z, K)
     n = group.size
     cov = rng.normal(size=n)
-    X = pd.DataFrame({
-        # identity: on in one blob, constant inside it up to iid noise
-        "blob0": (group == 0) + 0.05 * rng.random(n),
-        # state: follows a latent direction within every blob
-        "state": np.maximum(Z[:, 0] - centres[group, 0], 0),
-        # a state inside one blob only: the narrowest footprint
-        "narrow": (group == 0) * np.maximum(Z[:, 0] - centres[group, 0], 0),
-        "noise": rng.exponential(size=n),
-        "lin_cov": cov - cov.min(),
-    })
+    X = pd.DataFrame(
+        {
+            # identity: on in one blob, constant inside it up to iid noise
+            "blob0": (group == 0) + 0.05 * rng.random(n),
+            # state: follows a latent direction within every blob
+            "state": np.maximum(Z[:, 0] - centres[group, 0], 0),
+            # a state inside one blob only: the narrowest footprint
+            "narrow": (group == 0) * np.maximum(Z[:, 0] - centres[group, 0], 0),
+            "noise": rng.exponential(size=n),
+            "lin_cov": cov - cov.min(),
+        }
+    )
     return {"nb": nb, "X": X, "group": group, "cov": cov, "n": n}
 
 
@@ -52,17 +54,40 @@ def world():
 def result(world):
     labels = np.array([f"g{g}" for g in world["group"]])
     return graph_specificity(
-        world["nb"], world["X"], k=[10, K], groups=labels, annotate={"blob": labels},
-        covariate=world["cov"], control="blob0", n_perm=19,
+        world["nb"],
+        world["X"],
+        k=[10, K],
+        groups=labels,
+        annotate={"blob": labels},
+        covariate=world["cov"],
+        control="blob0",
+        n_perm=19,
     ).set_index(["factor", "k"])
 
 
 def test_columns_and_rows(result):
     assert set(result.index.get_level_values("factor")) == {
-        "blob0", "state", "narrow", "noise", "lin_cov", "_perm_control", "_covariate"}
+        "blob0",
+        "state",
+        "narrow",
+        "noise",
+        "lin_cov",
+        "_perm_control",
+        "_covariate",
+    }
     assert set(result.index.get_level_values("k")) == {10, K}
-    for col in ("moran_i", "moran_p", "pr", "pr_null", "specificity", "moran_i_within_group",
-                "moran_i_resid", "covariate_spearman", "top_blob", "top_blob_share"):
+    for col in (
+        "moran_i",
+        "moran_p",
+        "pr",
+        "pr_null",
+        "specificity",
+        "moran_i_within_group",
+        "moran_i_resid",
+        "covariate_spearman",
+        "top_blob",
+        "top_blob_share",
+    ):
         assert col in result.columns
 
 
@@ -106,8 +131,10 @@ def test_covariate_residualisation(result):
 
 def test_sparse_graph_matches_index_array(world):
     nb, n = world["nb"], world["n"]
-    G = sp.csr_matrix((np.random.default_rng(1).random(nb.size) + 0.1,
-                       (np.repeat(np.arange(n), K), nb.ravel())), shape=(n, n))
+    G = sp.csr_matrix(
+        (np.random.default_rng(1).random(nb.size) + 0.1, (np.repeat(np.arange(n), K), nb.ravel())),
+        shape=(n, n),
+    )
     G.setdiag(1.0)  # self edges must be dropped
     a = graph_specificity(nb, world["X"], n_perm=9)
     b = graph_specificity(G, world["X"], n_perm=9)

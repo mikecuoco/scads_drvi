@@ -25,11 +25,11 @@ def _toy(seed=0, n=800, K=3, M=40, G=5):
     """Small, deliberately nasty: zero-inflated and heavy-tailed on both sides, uneven strata."""
     rng = np.random.default_rng(seed)
     W = rng.lognormal(0, 2, size=(K, n)).astype(np.float32)
-    W[rng.random((K, n)) < 0.6] = 0.0                      # zero inflation, like the real thing
+    W[rng.random((K, n)) < 0.6] = 0.0  # zero inflation, like the real thing
     S = rng.lognormal(0, 1.5, size=(n, M)).astype(np.float32)
     S[rng.random((n, M)) < 0.65] = 0.0
     strata_ix = rng.integers(0, G, size=n).astype(np.int32)
-    for g in range(G):                                      # guarantee every stratum >= 2
+    for g in range(G):  # guarantee every stratum >= 2
         strata_ix[rng.choice(n, 2, replace=False)] = g
     return W, S, strata_ix, G
 
@@ -92,7 +92,7 @@ def test_stratified_null_matches_sampling():
     draws = np.empty((n_perm, W.shape[0], S.shape[1]))
     for i in range(n_perm):
         perm = np.arange(len(strata_ix))
-        for idx in by_stratum:                       # permute WITHIN each stratum only
+        for idx in by_stratum:  # permute WITHIN each stratum only
             perm[idx] = rng.permutation(idx)
         draws[i] = W[:, perm].astype(np.float64) @ S.astype(np.float64)
 
@@ -139,7 +139,7 @@ def test_nes_is_invariant_to_per_factor_scale():
     nes_a, _, _ = stratified_nes(T, sumS, sumS2, W, strata_ix, G)
 
     W2 = W.copy()
-    W2[0] *= 1e6                       # one factor blown up by six orders of magnitude
+    W2[0] *= 1e6  # one factor blown up by six orders of magnitude
     T2, _, _ = _moments(W2, S, strata_ix, G)
     nes_b, _, _ = stratified_nes(T2, sumS, sumS2, W2, strata_ix, G)
 
@@ -151,12 +151,12 @@ def test_stratification_removes_a_planted_confounder():
     rng = np.random.default_rng(3)
     n, G = 2000, 4
     strata_ix = rng.integers(0, G, size=n).astype(np.int32)
-    hot = strata_ix == 0                       # e.g. the high-GC, wide-region stratum
+    hot = strata_ix == 0  # e.g. the high-GC, wide-region stratum
 
     W = rng.lognormal(0, 1, size=(1, n)).astype(np.float32)
-    W[0][hot] *= 8.0                           # this factor prefers that stratum
+    W[0][hot] *= 8.0  # this factor prefers that stratum
     S = rng.lognormal(0, 1, size=(n, 1)).astype(np.float32)
-    S[hot, 0] *= 8.0                           # ...and so does this motif. No real link.
+    S[hot, 0] *= 8.0  # ...and so does this motif. No real link.
 
     T, sumS, sumS2 = _moments(W, S, strata_ix, G)
     nes_strat, _, _ = stratified_nes(T, sumS, sumS2, W, strata_ix, G)
@@ -164,15 +164,16 @@ def test_stratification_removes_a_planted_confounder():
 
     assert abs(nes_raw[0, 0]) > 5.0, "planted confound should look significant uncorrected"
     assert abs(nes_strat[0, 0]) < abs(nes_raw[0, 0]) / 3.0, (
-        f"stratification failed to suppress it: {nes_raw[0, 0]:.2f} -> {nes_strat[0, 0]:.2f}")
+        f"stratification failed to suppress it: {nes_raw[0, 0]:.2f} -> {nes_strat[0, 0]:.2f}"
+    )
 
 
 def test_soft_threshold_zeros_only_low_positives():
     """Zeros go below the given percentile of each row's OWN positive values."""
     W = np.array([[0.0, 1.0, 2.0, 3.0, 4.0], [5.0, 5.0, 5.0, 0.0, 0.0]])
     out = soft_threshold(W, 50.0)
-    assert (out[0] == 0).sum() > (W[0] == 0).sum()   # some positives were zeroed in row 0
-    assert np.array_equal(out[1], W[1])              # a constant row has no "below" to zero
+    assert (out[0] == 0).sum() > (W[0] == 0).sum()  # some positives were zeroed in row 0
+    assert np.array_equal(out[1], W[1])  # a constant row has no "below" to zero
 
 
 def test_soft_threshold_noop_at_zero_pct():
@@ -196,6 +197,6 @@ def test_covariate_strata_matches_manual_gc_width_crossing():
 def test_covariate_strata_drops_small_strata_and_nonfinite():
     x = np.concatenate([np.full(3, np.nan), np.linspace(0, 1, 197)])
     keep, strata_ix, n_strata = covariate_strata([x], n_bins=50, min_size=2)
-    assert keep.sum() < 200            # the 3 NaNs are gone, and possibly a thin bin
+    assert keep.sum() < 200  # the 3 NaNs are gone, and possibly a thin bin
     assert not keep[:3].any()
     assert np.bincount(strata_ix, minlength=n_strata).min() >= 2

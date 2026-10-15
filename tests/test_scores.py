@@ -135,9 +135,7 @@ class TestCsFromZ:
 class TestReadCellScores:
     def test_reads_the_ratio_score(self, tmp_path):
         path = tmp_path / "cell_scores.tsv"
-        pd.DataFrame({"barcode": ["a", "b"], "cs": [1.2, 0.8]}).to_csv(
-            path, sep="\t", index=False
-        )
+        pd.DataFrame({"barcode": ["a", "b"], "cs": [1.2, 0.8]}).to_csv(path, sep="\t", index=False)
         scores = read_cell_scores(path, model="m", trait="t")
         assert scores.kind is ScoreKind.SCADS_RATIO
         assert scores.null == 1.0
@@ -180,17 +178,13 @@ class TestCompareScores:
 
     def test_disjoint_cells_are_refused(self):
         left, right = self._pair()
-        other = CellScores(
-            pd.Series([1.0], index=["zzz"]), ScoreKind.SCADS_RATIO, "m", "t"
-        )
+        other = CellScores(pd.Series([1.0], index=["zzz"]), ScoreKind.SCADS_RATIO, "m", "t")
         with pytest.raises(ValueError, match="share no cells"):
             compare_scores(left, other)
 
     def test_only_shared_cells_are_compared(self):
         left, right = self._pair()
-        trimmed = CellScores(
-            right.values.iloc[:5], ScoreKind.SCADS_RATIO, "m", "t"
-        )
+        trimmed = CellScores(right.values.iloc[:5], ScoreKind.SCADS_RATIO, "m", "t")
         out = compare_scores(left, trimmed)
         assert out.loc[0, "n_shared"] == 5
 

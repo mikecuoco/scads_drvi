@@ -62,9 +62,7 @@ class TestReadResults:
         annot2factor, root = arm
         for annot in ("k1", "k2"):
             write_results(root / "t1" / f"{annot}.results", 4.0, extra_rows=2)
-        frame = read_results(
-            root, traits=["t1"], annot2factor=annot2factor, row=1, fdr=False
-        )
+        frame = read_results(root, traits=["t1"], annot2factor=annot2factor, row=1, fdr=False)
         assert set(frame["Category"]) == {"baseline_0"}
 
     def test_row_out_of_range_is_explained(self, arm):

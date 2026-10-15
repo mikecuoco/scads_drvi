@@ -54,8 +54,8 @@ embed = ad.AnnData(
     obs=adata.obs[["cell_type", "tissue", "donor"]].copy(),
 )
 embed.var_names = [f"dr_{i}" for i in range(embed.n_vars)]
-model.set_latent_dimension_stats(embed)   # vanished, order, title, and friends
-embed.obsm["X_umap"] = umap.UMAP().fit_transform(embed.X)   # set once computed, not read
+model.set_latent_dimension_stats(embed)  # vanished, order, title, and friends
+embed.obsm["X_umap"] = umap.UMAP().fit_transform(embed.X)  # set once computed, not read
 
 embed.uns["provenance"] = {"n_latent": 96, "batch_key": "donor", "model_dir": "my_fit/model"}
 embed.write_h5ad("my_fit_cells.h5ad")
@@ -82,13 +82,13 @@ much does perturbing factor k move peak j's reconstruction", aggregated over cel
 weighted by how active each factor is in each cell:
 
 ```python
-effect = model.get_effect_of_splits_within_distribution(
-    directional=False, aggregations="max"
-)["max"]   # (n_latent, n_peaks), non-negative
+effect = model.get_effect_of_splits_within_distribution(directional=False, aggregations="max")[
+    "max"
+]  # (n_latent, n_peaks), non-negative
 
-feature_loadings = ad.AnnData(effect.T, obs=adata.var[[]].copy())   # peaks x factors
-feature_loadings.obs_names = adata.var_names   # peak ids, e.g. "chr1:1000-1500"
-feature_loadings.var_names = embed.var_names   # same dr_0..dr_{K-1} naming as embed
+feature_loadings = ad.AnnData(effect.T, obs=adata.var[[]].copy())  # peaks x factors
+feature_loadings.obs_names = adata.var_names  # peak ids, e.g. "chr1:1000-1500"
+feature_loadings.var_names = embed.var_names  # same dr_0..dr_{K-1} naming as embed
 feature_loadings.write_h5ad("my_fit_peaks.h5ad")
 ```
 
@@ -119,8 +119,8 @@ embed.write_h5ad("my_fit_cells.h5ad")
 import anndata as ad
 
 embed = ad.read_h5ad("my_fit_cells.h5ad")
-embed.var["vanished"]          # DRVI's own per-dimension flag
-embed.obsm["X_umap"]           # the embedding, if one was attached
+embed.var["vanished"]  # DRVI's own per-dimension flag
+embed.obsm["X_umap"]  # the embedding, if one was attached
 ```
 
 ## Running S-LDSC enrichment
@@ -145,7 +145,7 @@ from scads_drvi.enrich.config import kept_dims, select_factors
 from scads_drvi.enrich.ldsc import read_results
 
 fmap = select_factors(embed.var, list(embed.var_names))
-keep = kept_dims(fmap)                       # dims that survive vanished-filtering
+keep = kept_dims(fmap)  # dims that survive vanished-filtering
 annot2factor = {f"k{i + 1}": factor for i, factor in enumerate(keep)}
 
 bim = read_bim("1000G.EUR.QC.1.bim")
@@ -155,17 +155,41 @@ for annot, factor in annot2factor.items():
     pd.DataFrame({annot: thin}).to_csv(f"annot/{annot}.1.annot.gz", sep="\t", index=False)
     # --thin-annot accepts that shape directly; --out writes .l2.ldscore.gz/.M/.M_5_50.
     # --annot takes the full file name.
-    subprocess.run([
-        "ldsc.py", "--l2", "--bfile", "1000G.EUR.QC.1",
-        "--annot", f"annot/{annot}.1.annot.gz", "--thin-annot",
-        "--ld-wind-cm", "1.0", "--out", f"ld/{annot}.1",
-    ], check=True)
+    subprocess.run(
+        [
+            "ldsc.py",
+            "--l2",
+            "--bfile",
+            "1000G.EUR.QC.1",
+            "--annot",
+            f"annot/{annot}.1.annot.gz",
+            "--thin-annot",
+            "--ld-wind-cm",
+            "1.0",
+            "--out",
+            f"ld/{annot}.1",
+        ],
+        check=True,
+    )
     # --print-coefficients writes results/trait_a/{annot}.results.
-    subprocess.run([
-        "ldsc.py", "--h2", "trait_a.sumstats.gz", "--ref-ld-chr", f"ld/{annot}.",
-        "--w-ld-chr", "weights.", "--overlap-annot", "--frqfile-chr", "1000G.EUR.QC.",
-        "--print-coefficients", "--out", f"results/trait_a/{annot}",
-    ], check=True)
+    subprocess.run(
+        [
+            "ldsc.py",
+            "--h2",
+            "trait_a.sumstats.gz",
+            "--ref-ld-chr",
+            f"ld/{annot}.",
+            "--w-ld-chr",
+            "weights.",
+            "--overlap-annot",
+            "--frqfile-chr",
+            "1000G.EUR.QC.",
+            "--print-coefficients",
+            "--out",
+            f"results/trait_a/{annot}",
+        ],
+        check=True,
+    )
 ```
 
 Reading the results back attaches one tidy table, keyed by `factor` and `direction`, into
@@ -223,25 +247,34 @@ enrichment step above computed, so a factor `select_factors` dropped there (e.g.
 import anndata as ad
 import numpy as np
 
-from scads_drvi.annotate.motif import build_region_map, gc_width_strata, regionise, weighted_motif_enrichment
+from scads_drvi.annotate.motif import (
+    build_region_map,
+    gc_width_strata,
+    regionise,
+    weighted_motif_enrichment,
+)
 from scads_drvi.annotate.resources import ensure_screen_database, read_score_db_regions
 from scads_drvi.enrich.config import kept_feature_loadings
 
-feature_loadings = ad.read_h5ad("my_fit_peaks.h5ad")   # peaks x dims
-peak_loadings = kept_feature_loadings(feature_loadings, fmap)     # peaks x keep, same dims as above
-W = np.clip(peak_loadings.to_numpy(), 0, None).T                  # (K, n_peaks), non-negative
+feature_loadings = ad.read_h5ad("my_fit_peaks.h5ad")  # peaks x dims
+peak_loadings = kept_feature_loadings(feature_loadings, fmap)  # peaks x keep, same dims as above
+W = np.clip(peak_loadings.to_numpy(), 0, None).T  # (K, n_peaks), non-negative
 
-db_path = ensure_screen_database("hg38", "v10_clust", allow_download=True)   # ~14 GB, cached after
+db_path = ensure_screen_database("hg38", "v10_clust", allow_download=True)  # ~14 GB, cached after
 used_cols, peak_rows, region_names = build_region_map(
     peak_loadings.index, read_score_db_regions(db_path)
 )
 keep_mask, strata_ix, n_strata = gc_width_strata(region_names, "genome.fa")
 
-Wr = regionise(W, peak_rows)[:, keep_mask]   # (K, n_regions), averaged onto db regions
+Wr = regionise(W, peak_rows)[:, keep_mask]  # (K, n_regions), averaged onto db regions
 rows, meta = weighted_motif_enrichment(
-    Wr, labels=peak_loadings.columns, used_cols=used_cols[keep_mask],
+    Wr,
+    labels=peak_loadings.columns,
+    used_cols=used_cols[keep_mask],
     region_names=[r for r, k in zip(region_names, keep_mask) if k],
-    strata_ix=strata_ix, n_strata=n_strata, db_path=db_path,
+    strata_ix=strata_ix,
+    n_strata=n_strata,
+    db_path=db_path,
 )
 # one row per (factor, motif): weighted_score, nes, nes_unstratified
 ```
@@ -256,13 +289,13 @@ from scads_drvi.scores.cell import cs_from_z
 
 primary = arm["results"].loc[arm["results"]["trait"] == "trait_a"]
 # relu(X) -- the ONLY place a pos/neg split is ever materialized, derived on demand
-loadings = pd.DataFrame(
-    np.clip(embed.X, 0, None), index=embed.obs_names, columns=embed.var_names
-)[keep]
+loadings = pd.DataFrame(np.clip(embed.X, 0, None), index=embed.obs_names, columns=embed.var_names)[
+    keep
+]
 scores = cs_from_z(loadings, primary, model="my_arm", trait="trait_a")
 
-scores.null    # 0.0  — read this; never hardcode it beside an axis
-scores.label   # "$CS_i$ (z-weighted loading sum)"
+scores.null  # 0.0  — read this; never hardcode it beside an axis
+scores.label  # "$CS_i$ (z-weighted loading sum)"
 ```
 
 The other score, the SCADS enrichment ratio (`cs_i = Σ_k L_ik a_k e_k / Σ_k L_ik a_k`,

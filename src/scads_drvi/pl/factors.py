@@ -154,11 +154,17 @@ def factor_correlation(
     panels = [correlation] if split is None else [correlation, split]
     size = max(4.0, 0.11 * max(len(p) for p in panels))
     fig, axes = plt.subplots(
-        1, len(panels), figsize=(len(panels) * size + 1.2, size), squeeze=False, layout="constrained"
+        1,
+        len(panels),
+        figsize=(len(panels) * size + 1.2, size),
+        squeeze=False,
+        layout="constrained",
     )
     for ax, panel in zip(axes[0], panels, strict=True):
         image = _correlation_panel(ax, panel, dead=dead, method=method, cmap=cmap)
-    fig.colorbar(image, ax=list(axes[0]), pad=0.02, fraction=0.045 / len(panels)).set_label("Pearson r")
+    fig.colorbar(image, ax=list(axes[0]), pad=0.02, fraction=0.045 / len(panels)).set_label(
+        "Pearson r"
+    )
     if split is None:
         return fig, axes[0, 0]
     axes[0, 0].set_title("signed factors", fontsize=8)
@@ -406,7 +412,12 @@ def _align_columns(
 
 
 def _bar_colors(
-    color: Any, keys: Sequence[Any], values: np.ndarray, *, default: Any, alt_keys: Sequence[Any] | None = None,
+    color: Any,
+    keys: Sequence[Any],
+    values: np.ndarray,
+    *,
+    default: Any,
+    alt_keys: Sequence[Any] | None = None,
     name: str = "",
 ) -> Any:
     """Per-bar colours from a BarSeries `color`: a colour, a key -> colour mapping, or a colormap."""
@@ -430,7 +441,9 @@ def _bar_colors(
         else:
             missing.append(key)
     if missing:
-        raise KeyError(f"{name or 'color'} has no colour for {len(missing)} bar(s), e.g. {missing[:5]}")
+        raise KeyError(
+            f"{name or 'color'} has no colour for {len(missing)} bar(s), e.g. {missing[:5]}"
+        )
     return out
 
 
@@ -476,6 +489,7 @@ def _per_category(
     groups = [cells[cats == cat] for cat in cat_order]
     agg = _AGG_FUNCTIONS[series.agg]
     values = np.array([agg(g) if len(g) else np.nan for g in groups])
+
     # Standard error of the mean for "mean"/"median" (an average estimate); of the *sum* --
     # sqrt(n) * std, not std / sqrt(n) -- for "sum", the un-normalised total a group's cells
     # contribute rather than a per-cell average.
@@ -491,14 +505,23 @@ def _specificity_order(
 ) -> np.ndarray:
     """Column positions sorted by descending `specificity` (NaN last); ties keep var order."""
     if specificity is None:
-        raise ValueError('order="specificity" needs `specificity`, a Series of one score per column')
+        raise ValueError(
+            'order="specificity" needs `specificity`, a Series of one score per column'
+        )
     score = _align_columns(specificity, var, title_col, what="specificity")
     return np.argsort(-np.where(np.isnan(score), -np.inf, score), kind="stable")
 
 
 def _draw_column_bar(
-    fig: Figure, heat: Axes, rect: tuple[float, float, float, float], series: BarSeries, values: np.ndarray, *,
-    se: np.ndarray | None, q: np.ndarray | None, colors: Any = None,
+    fig: Figure,
+    heat: Axes,
+    rect: tuple[float, float, float, float],
+    series: BarSeries,
+    values: np.ndarray,
+    *,
+    se: np.ndarray | None,
+    q: np.ndarray | None,
+    colors: Any = None,
 ) -> Axes:
     from matplotlib.ticker import MaxNLocator
 
@@ -518,7 +541,12 @@ def _draw_column_bar(
     elif colors is None:
         colors = "#0173B2"
     bar.bar(
-        np.arange(len(values)), values, yerr=se, color=colors, width=0.9, zorder=2,
+        np.arange(len(values)),
+        values,
+        yerr=se,
+        color=colors,
+        width=0.9,
+        zorder=2,
         error_kw={"ecolor": "0.2", "elinewidth": 0.8, "capsize": 2},
     )
     bar.axhline(0, color="0.3", lw=0.6, zorder=1)
@@ -539,21 +567,39 @@ def _draw_column_bar(
         )
         # Outside the axes, right of the last column: inside it covers the tallest bars.
         bar.legend(
-            handles=significance_handles(DEFAULT_RAMP), frameon=False, fontsize=_FONT_PT,
-            loc="lower left", bbox_to_anchor=(1.01, 0.0), borderaxespad=0,
+            handles=significance_handles(DEFAULT_RAMP),
+            frameon=False,
+            fontsize=_FONT_PT,
+            loc="lower left",
+            bbox_to_anchor=(1.01, 0.0),
+            borderaxespad=0,
         )
     return bar
 
 
 def _draw_row_bar(
-    fig: Figure, heat: Axes, rect: tuple[float, float, float, float], series: BarSeries, values: np.ndarray, *,
-    se: np.ndarray | None, mids: np.ndarray, heights: np.ndarray, colors: Any, left: bool,
+    fig: Figure,
+    heat: Axes,
+    rect: tuple[float, float, float, float],
+    series: BarSeries,
+    values: np.ndarray,
+    *,
+    se: np.ndarray | None,
+    mids: np.ndarray,
+    heights: np.ndarray,
+    colors: Any,
+    left: bool,
 ) -> Axes:
     from matplotlib.ticker import MaxNLocator
 
     bar = fig.add_axes(rect, sharey=heat)
     bar.barh(
-        mids, values, xerr=se, height=heights, color=colors, zorder=2,
+        mids,
+        values,
+        xerr=se,
+        height=heights,
+        color=colors,
+        zorder=2,
         error_kw={"ecolor": "0.2", "elinewidth": 0.8, "capsize": 2},
     )
     bar.axvline(0, color="0.3", lw=0.6, zorder=1)
@@ -662,20 +708,35 @@ def latent_heatmap(
     if heritability is not None:
         warnings.warn(
             "`heritability*` is deprecated: pass `column_series=[BarSeries(...)]`",
-            DeprecationWarning, stacklevel=2,
+            DeprecationWarning,
+            stacklevel=2,
         )
-        column_series.insert(0, BarSeries(
-            heritability, label=heritability_label, se=heritability_se, q=heritability_q,
-            alpha=alpha, name="heritability",
-        ))
+        column_series.insert(
+            0,
+            BarSeries(
+                heritability,
+                label=heritability_label,
+                se=heritability_se,
+                q=heritability_q,
+                alpha=alpha,
+                name="heritability",
+            ),
+        )
     if cell_scores is not None:
         warnings.warn(
             "`cell_scores*` is deprecated: pass `row_series=[BarSeries(..., agg=...)]`",
-            DeprecationWarning, stacklevel=2,
+            DeprecationWarning,
+            stacklevel=2,
         )
-        row_series.insert(0, BarSeries(
-            cell_scores, label=cell_score_label, agg=cell_score_agg, name="cell_scores",
-        ))
+        row_series.insert(
+            0,
+            BarSeries(
+                cell_scores,
+                label=cell_score_label,
+                agg=cell_score_agg,
+                name="cell_scores",
+            ),
+        )
     has_series = bool(column_series or row_series or row_series_left)
 
     # `.obs`/`.var` are typed `DataFrame | Dataset2D` (scvi-tools' lazy/backed frame) in
@@ -756,10 +817,20 @@ def latent_heatmap(
         if isinstance(s.color, str) and s.color == "group":
             raise ValueError("color='group' is for row series; a column series has no categories")
         if s.q is not None and s.color is not None:
-            raise ValueError(f"{name}: q colours the bars by significance, so color cannot be set too")
+            raise ValueError(
+                f"{name}: q colours the bars by significance, so color cannot be set too"
+            )
         z = _align_columns(s.values, ordered_var, title_col, what=name)
-        se = _align_columns(s.se, ordered_var, title_col, what=f"{name}_se") if s.se is not None else None
-        q = _align_columns(s.q, ordered_var, title_col, what=f"{name}_q") if s.q is not None else None
+        se = (
+            _align_columns(s.se, ordered_var, title_col, what=f"{name}_se")
+            if s.se is not None
+            else None
+        )
+        q = (
+            _align_columns(s.q, ordered_var, title_col, what=f"{name}_q")
+            if s.q is not None
+            else None
+        )
         colors = _bar_colors(
             s.color, vars_to_show, z, default=None, alt_keys=list(ordered_var.index), name=name
         )
@@ -768,7 +839,11 @@ def latent_heatmap(
     if aggregate == "mean":
         import anndata as ad
 
-        means = pd.DataFrame(x).groupby(obs[categorical_column].astype(str).to_numpy(), sort=False).mean()
+        means = (
+            pd.DataFrame(x)
+            .groupby(obs[categorical_column].astype(str).to_numpy(), sort=False)
+            .mean()
+        )
         means = means.loc[cat_order]
         group_colors_in = embed.uns.get(f"{categorical_column}_colors")
         embed = ad.AnnData(
@@ -794,7 +869,11 @@ def latent_heatmap(
     def _extent(group: Sequence[BarSeries]) -> float:
         return sum(s.size_in + _BAR_GAP_IN for s in group)
 
-    top_in, right_in, left_in = _extent(column_series), _extent(row_series), _extent(row_series_left)
+    top_in, right_in, left_in = (
+        _extent(column_series),
+        _extent(row_series),
+        _extent(row_series_left),
+    )
     call_figsize = figsize
     if has_series:
         call_w, call_h = figsize
@@ -826,7 +905,11 @@ def latent_heatmap(
         # pixels are centred on integers: with one row per category the labels sit half a row low.
         for a in fig.axes:
             ticks = a.get_yticks()
-            if a is not heat and len(a.get_yticklabels()) == len(cat_order) and len(ticks) == len(cat_order):
+            if (
+                a is not heat
+                and len(a.get_yticklabels()) == len(cat_order)
+                and len(ticks) == len(cat_order)
+            ):
                 a.set_yticks(ticks - 0.5, [t.get_text() for t in a.get_yticklabels()])
 
     if not has_series:
@@ -863,7 +946,9 @@ def latent_heatmap(
     for s, (z, se, q, bar_colors) in zip(column_series, column_values, strict=True):
         height = s.size_in / fig_h
         column_axes.append(
-            _draw_column_bar(fig, heat, (pos.x0, y, pos.width, height), s, z, se=se, q=q, colors=bar_colors)
+            _draw_column_bar(
+                fig, heat, (pos.x0, y, pos.width, height), s, z, se=se, q=q, colors=bar_colors
+            )
         )
         y += height + _BAR_GAP_IN / fig_h
 
@@ -884,12 +969,26 @@ def latent_heatmap(
             values, se = row_values[id(s)]
             width = s.size_in / fig_w
             x_start = x0 - width if left else x0
-            out.append(_draw_row_bar(
-                fig, heat, (x_start, pos.y0, width, pos.height), s, values, se=se, mids=mids,
-                heights=heights,
-                colors=_bar_colors(s.color, cat_order, values, default=group_colors, name=_series_name(s, "row_series", 0)),
-                left=left,
-            ))
+            out.append(
+                _draw_row_bar(
+                    fig,
+                    heat,
+                    (x_start, pos.y0, width, pos.height),
+                    s,
+                    values,
+                    se=se,
+                    mids=mids,
+                    heights=heights,
+                    colors=_bar_colors(
+                        s.color,
+                        cat_order,
+                        values,
+                        default=group_colors,
+                        name=_series_name(s, "row_series", 0),
+                    ),
+                    left=left,
+                )
+            )
             x0 = x_start - _BAR_GAP_IN / fig_w if left else x0 + width + _BAR_GAP_IN / fig_w
         return out
 

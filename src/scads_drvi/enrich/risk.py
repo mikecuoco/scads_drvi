@@ -124,7 +124,9 @@ def peak_risk(
             )
             block["risk_rate"] = block["loading"] * t
             if snp_counts is not None:
-                block["risk_total"] = block["risk_rate"] * snp_counts.reindex(block["peak"]).to_numpy()
+                block["risk_total"] = (
+                    block["risk_rate"] * snp_counts.reindex(block["peak"]).to_numpy()
+                )
             blocks.append(block)
 
     if not blocks:
